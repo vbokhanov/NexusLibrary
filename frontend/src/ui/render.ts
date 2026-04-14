@@ -64,6 +64,21 @@ function renderPage(page) {
         <article class="glass feature"><h3>Совместная работа</h3><p>Сотрудники и читатели работают в единой системе.</p></article>
         <article class="glass feature"><h3>Мобильность</h3><p>Адаптивный интерфейс для компьютера, планшета и телефона.</p></article>
       </div>
+      <section class="solutions glass">
+        <h3>Возможности платформы</h3>
+        <div class="solution-list">
+          <article><h4>Учет фонда</h4><p>Полный учет книг, ISBN, жанров и остатков.</p></article>
+          <article><h4>Операции выдачи</h4><p>Контроль выдач, сроков и возвратов по пользователям.</p></article>
+          <article><h4>Сегментация ролей</h4><p>Гибкое разграничение прав и защищенные операции.</p></article>
+          <article><h4>Отчетность</h4><p>Оперативные метрики по каталогу и активности.</p></article>
+        </div>
+      </section>
+      <section class="faq glass">
+        <h3>Частые вопросы</h3>
+        <details><summary>Можно ли работать без авторизации?</summary><p>Просмотр каталога доступен, а управление книгами — только после входа.</p></details>
+        <details><summary>Как добавить обложку?</summary><p>Можно вставить ссылку на изображение или загрузить файл прямо в форме.</p></details>
+        <details><summary>Есть ли мобильная версия?</summary><p>Да, интерфейс полностью адаптивен для телефона и планшета.</p></details>
+      </section>
     </section>`;
   }
 
@@ -90,8 +105,23 @@ function renderPage(page) {
       <h2>Каталог книг</h2>
       <span>Роль: ${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</span>
     </div>
+    <div class="library-stats">
+      <article><strong>${state.books.length}</strong><span>Всего книг</span></article>
+      <article><strong>${state.favorites.length}</strong><span>Избранное</span></article>
+      <article><strong>${state.books.filter((b) => b.inStock > 0).length}</strong><span>Доступно сейчас</span></article>
+    </div>
     <div class="catalog-tools">
       <input id="searchInput" placeholder="Поиск по названию, автору, жанру" value="${state.search}" />
+      <select id="genreFilter">
+        <option value="all">Все жанры</option>
+        ${[...new Set(state.books.map((b) => b.genre).filter(Boolean))].map((genre) => `<option value="${genre}" ${state.genreFilter === genre ? "selected" : ""}>${genre}</option>`).join("")}
+      </select>
+      <select id="sortBy">
+        <option value="newest" ${state.sortBy === "newest" ? "selected" : ""}>Сначала новые</option>
+        <option value="oldest" ${state.sortBy === "oldest" ? "selected" : ""}>Сначала старые</option>
+        <option value="title" ${state.sortBy === "title" ? "selected" : ""}>По названию</option>
+        <option value="stock" ${state.sortBy === "stock" ? "selected" : ""}>По наличию</option>
+      </select>
       <button id="loadBooks">Обновить каталог</button>
     </div>
     <div class="grid-two">
@@ -128,6 +158,13 @@ function bookForm() {
     <input name="year" type="number" min="1800" max="${new Date().getFullYear()}" required />
     <input name="genre" placeholder="Жанр" required />
     <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
+    <label class="file-label">
+      Загрузить обложку
+      <input name="coverFile" id="coverFile" type="file" accept="image/*" />
+    </label>
+    <div id="coverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
+      ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр обложки" />` : "<span>Предпросмотр обложки</span>"}
+    </div>
     <input name="inStock" type="number" min="0" max="999" required />
     <div class="inline-actions">
       <button type="submit">${state.editingId ? "Сохранить изменения" : "Добавить книгу"}</button>
@@ -140,7 +177,15 @@ export function renderBooks() {
   const list = document.querySelector("#bookList");
   if (!list) return;
   const q = state.search.trim().toLowerCase();
-  const filtered = state.books.filter((book) => !q || [book.title, book.author, book.genre].join(" ").toLowerCase().includes(q));
+  const filtered = state.books
+    .filter((book) => !q || [book.title, book.author, book.genre].join(" ").toLowerCase().includes(q))
+    .filter((book) => state.genreFilter === "all" || book.genre === state.genreFilter)
+    .sort((a, b) => {
+      if (state.sortBy === "oldest") return a.year - b.year;
+      if (state.sortBy === "title") return String(a.title).localeCompare(String(b.title), "ru");
+      if (state.sortBy === "stock") return b.inStock - a.inStock;
+      return b.id - a.id;
+    });
   if (!filtered.length) return (list.innerHTML = `<p class="empty">Ничего не найдено.</p>`);
   list.innerHTML = filtered.map((book) => `
     <article class="book-card">
@@ -148,6 +193,7 @@ export function renderBooks() {
       <h3>${book.title}</h3><p>${book.author} • ${book.genre}</p><p>ISBN: ${book.isbn}</p>
       <p>Год: ${book.year} • В наличии: ${book.inStock}</p>
       <div class="inline-actions">
+        <button data-action="favorite" data-id="${book.id}" class="${state.favorites.includes(book.id) ? "active" : "secondary"}">${state.favorites.includes(book.id) ? "В избранном" : "В избранное"}</button>
         <button data-action="edit" data-id="${book.id}" ${!canManageBooks() ? "disabled" : ""}>Редактировать</button>
         <button data-action="delete" data-id="${book.id}" class="secondary" ${!canDeleteBooks() ? "disabled" : ""}>Удалить</button>
       </div>

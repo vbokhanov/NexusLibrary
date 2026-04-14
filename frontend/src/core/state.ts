@@ -11,8 +11,12 @@ export const state = {
   role: localStorage.getItem("role") || "GUEST",
   books: [],
   search: "",
+  genreFilter: "all",
+  sortBy: "newest",
   editingId: null,
-  authTab: "login"
+  authTab: "login",
+  coverDraft: "",
+  favorites: JSON.parse(localStorage.getItem("favorites") || "[]")
 };
 
 export function getCurrentPath() {

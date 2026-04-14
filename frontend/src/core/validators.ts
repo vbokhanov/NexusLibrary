@@ -11,8 +11,8 @@ export function validateBook(payload) {
   if (!Number.isInteger(payload.inStock) || payload.inStock < 0 || payload.inStock > 999) {
     errors.push("Количество: от 0 до 999");
   }
-  if (payload.coverUrl && !/^https?:\/\//.test(payload.coverUrl)) {
-    errors.push("Обложка: ссылка должна начинаться с http/https");
+  if (payload.coverUrl && !/^https?:\/\//.test(payload.coverUrl) && !/^data:image\/[a-zA-Z+]+;base64,/.test(payload.coverUrl)) {
+    errors.push("Обложка: нужна ссылка https://... или загруженный файл");
   }
   return errors;
 }

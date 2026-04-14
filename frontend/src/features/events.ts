@@ -93,9 +93,29 @@ function bindLibrary(rerender) {
     state.search = event.target.value;
     renderBooks();
   });
+  document.querySelector("#genreFilter")?.addEventListener("change", (event) => {
+    state.genreFilter = event.target.value;
+    renderBooks();
+  });
+  document.querySelector("#sortBy")?.addEventListener("change", (event) => {
+    state.sortBy = event.target.value;
+    renderBooks();
+  });
   document.querySelector("#cancelEdit")?.addEventListener("click", () => {
     state.editingId = null;
+    state.coverDraft = "";
     rerender();
+  });
+  document.querySelector("#coverFile")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      state.coverDraft = await resizeImageToDataUrl(file, 420, 560);
+      updateCoverPreview();
+      notify("Обложка загружена", "success");
+    } catch (error) {
+      notify("Не удалось обработать изображение", "error");
+    }
   });
   document.querySelector("#bookForm")?.addEventListener("submit", submitBook);
   document.querySelector("#bookList")?.addEventListener("click", onBookAction);
@@ -108,6 +128,7 @@ async function submitBook(e) {
   const payload = Object.fromEntries(new FormData(e.currentTarget));
   payload.year = Number(payload.year);
   payload.inStock = Number(payload.inStock);
+  payload.coverUrl = state.coverDraft || String(payload.coverUrl || "").trim();
   const errors = validateBook(payload);
   if (errors.length) return notify(errors[0], "warning");
   try {
@@ -116,7 +137,9 @@ async function submitBook(e) {
     await apiRequest(endpoint, { method, body: JSON.stringify(payload) }, state.token);
     notify(state.editingId ? "Книга обновлена" : "Книга добавлена", "success");
     state.editingId = null;
+    state.coverDraft = "";
     e.currentTarget.reset();
+    updateCoverPreview();
     await loadBooks();
   } catch (error) {
     notify("Не удалось сохранить книгу", "error");
@@ -128,6 +151,7 @@ async function onBookAction(event) {
   const action = target.dataset.action;
   const id = Number(target.dataset.id);
   if (!action || !id) return;
+  if (action === "favorite") return toggleFavorite(id);
   if (action === "edit") return enableEdit(id);
   if (action === "delete") return deleteBook(id);
 }
@@ -141,6 +165,8 @@ function enableEdit(id) {
   form.title.value = book.title; form.author.value = book.author; form.isbn.value = book.isbn;
   form.year.value = book.year; form.genre.value = book.genre; form.coverUrl.value = book.coverUrl || "";
   form.inStock.value = book.inStock;
+  state.coverDraft = book.coverUrl || "";
+  updateCoverPreview();
   notify("Режим редактирования включен", "info");
 }
 
@@ -160,4 +186,51 @@ function persistUser(data) {
   state.role = data.user.role || "READER";
   localStorage.setItem("token", state.token);
   localStorage.setItem("role", state.role);
+}
+
+function toggleFavorite(id) {
+  if (state.favorites.includes(id)) {
+    state.favorites = state.favorites.filter((item) => item !== id);
+    notify("Удалено из избранного", "info");
+  } else {
+    state.favorites = [...state.favorites, id];
+    notify("Добавлено в избранное", "success");
+  }
+  localStorage.setItem("favorites", JSON.stringify(state.favorites));
+  renderBooks();
+}
+
+function updateCoverPreview() {
+  const block = document.querySelector("#coverPreview");
+  if (!block) return;
+  if (!state.coverDraft) {
+    block.classList.remove("has-image");
+    block.innerHTML = "<span>Предпросмотр обложки</span>";
+    return;
+  }
+  block.classList.add("has-image");
+  block.innerHTML = `<img src="${state.coverDraft}" alt="Предпросмотр обложки" />`;
+}
+
+function resizeImageToDataUrl(file, maxWidth, maxHeight) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Canvas unavailable"));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      };
+      img.onerror = reject;
+      img.src = String(reader.result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
