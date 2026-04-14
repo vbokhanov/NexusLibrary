@@ -55,6 +55,12 @@ function bindAuth(navigate, rerender) {
     state.authTab = "register";
     rerender();
   });
+  setupCustomSelect("registerRole", (value, option) => {
+    const roleInput = document.querySelector("#registerRole");
+    if (roleInput) roleInput.value = value;
+    const labelNode = document.querySelector('[data-custom-select="registerRole"] [data-select-trigger] span');
+    if (labelNode) labelNode.textContent = option?.textContent || "Читатель";
+  });
 
   document.querySelector("#loginForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -74,6 +80,7 @@ function bindAuth(navigate, rerender) {
   document.querySelector("#registerForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const payload = Object.fromEntries(new FormData(e.currentTarget));
+    payload.role = String(payload.role || "READER").toUpperCase();
     const err = validateRegister(payload);
     if (err) return notify(err, "warning");
     try {
@@ -82,7 +89,7 @@ function bindAuth(navigate, rerender) {
       notify("Регистрация успешна", "success");
       navigate("/library");
     } catch (error) {
-      notify("Не удалось зарегистрироваться", "error");
+      notify(parseApiError(error, "Не удалось зарегистрироваться"), "error");
     }
   });
 }
@@ -137,8 +144,24 @@ function setupCustomSelect(id, onChange) {
     const option = event.target.closest("[data-select-option]");
     if (!option) return;
     root.classList.remove("open");
-    onChange(option.dataset.value);
+    onChange(option.dataset.value, option);
   });
+}
+
+function parseApiError(error, fallback) {
+  const raw = String(error?.message || "").trim();
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.details) && parsed.details.length > 0) {
+      const issue = parsed.details[0];
+      const field = Array.isArray(issue?.path) ? issue.path.join(".") : "";
+      return field ? `Ошибка поля ${field}: ${issue.message}` : `Ошибка: ${issue.message}`;
+    }
+    return parsed?.message || fallback;
+  } catch (_) {
+    return raw || fallback;
+  }
 }
 
 async function submitBook(e) {

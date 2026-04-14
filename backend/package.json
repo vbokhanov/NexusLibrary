@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "start:docker": "prisma migrate deploy && node src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "node prisma/seed.js",
+    "prisma:import:real": "node prisma/import-openlibrary.js",
     "test": "jest --runInBand",
     "test:fuzz": "jest --runInBand tests/fuzz.auth.test.js"
   },

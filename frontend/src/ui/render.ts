@@ -175,7 +175,17 @@ function registerForm() {
     <input name="fullName" placeholder="ФИО" required minlength="3" />
     <input name="email" type="email" placeholder="Email" required />
     <input name="password" type="password" placeholder="Пароль" required minlength="8" />
-    <select name="role"><option value="READER">Читатель</option><option value="LIBRARIAN">Библиотекарь</option></select>
+    <input type="hidden" name="role" id="registerRole" value="READER" />
+    ${customSelect(
+      "registerRole",
+      "Читатель",
+      [
+        { value: "READER", label: "Читатель" },
+        { value: "LIBRARIAN", label: "Библиотекарь" },
+        { value: "ADMIN", label: "Администратор" }
+      ],
+      "READER"
+    )}
     <button type="submit">Создать аккаунт</button>
   </form>`;
 }
