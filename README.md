@@ -62,18 +62,3 @@
 - admin: `admin@library.local` / `Admin123!`
 - reader: `reader@library.local` / `Reader123!`
 
-## План из 14 логических коммитов
-1. `init: scaffold backend and frontend workspaces`
-2. `chore: add backend dependencies and scripts`
-3. `feat(api): add prisma schema and seed data`
-4. `feat(auth): implement jwt auth and role middleware`
-5. `feat(books): add books CRUD endpoints with validation`
-6. `test(api): add integration auth validation test`
-7. `test(fuzz): add property-based fuzzing for login payload`
-8. `feat(ui): implement responsive dashboard layout`
-9. `feat(ui-auth): connect login flow to backend api`
-10. `feat(ui-books): implement books list and create form`
-11. `chore(devops): add Dockerfiles and docker-compose`
-12. `docs(analysis): add domain analysis and UML diagram`
-13. `docs(deploy): add cloud deploy template with token placeholders`
-14. `docs(readme): finalize setup guide and project structure`
