@@ -156,6 +156,62 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .library-stats strong { font-size: 22px; }
 .library-stats span { opacity: .8; font-size: 13px; }
 .catalog-tools { display: grid; grid-template-columns: 1fr 180px 170px 190px; gap: 10px; margin-bottom: 10px; }
+.custom-select { position: relative; }
+.custom-select-trigger {
+  width: 100%;
+  justify-content: space-between;
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+  border: 0;
+  color: #eef4ff;
+  background: linear-gradient(120deg, rgba(44, 66, 138, .95), rgba(33, 48, 102, .95));
+  box-shadow: inset 0 0 0 1px rgba(132, 214, 255, .35), 0 6px 14px rgba(6, 18, 52, .22);
+}
+.custom-caret {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #9bd8ff;
+  border-bottom: 2px solid #9bd8ff;
+  transform: rotate(45deg) translateY(-1px);
+  transition: transform .2s ease;
+}
+.custom-select.open .custom-caret { transform: rotate(225deg) translateY(-1px); }
+.custom-select-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding: 6px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(24, 39, 88, .98), rgba(17, 28, 66, .98));
+  box-shadow: 0 12px 20px rgba(5, 16, 45, .35);
+  border: 1px solid rgba(126, 208, 255, .35);
+  display: grid;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+.custom-select.open .custom-select-menu {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.custom-option {
+  border: 0;
+  border-radius: 9px;
+  text-align: left;
+  padding: 9px 10px;
+  color: #ecf5ff;
+  background: transparent;
+}
+.custom-option:hover,
+.custom-option.is-selected {
+  background: rgba(88, 165, 255, .25);
+}
 .book-list { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 12px; max-height: 640px; overflow: auto; padding-right: 2px; }
 .book-card { background: rgba(0, 0, 0, .22); border-radius: 14px; padding: 12px; }
 .book-cover { width: 100%; height: 180px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); margin-bottom: 8px; }

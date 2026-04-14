@@ -93,13 +93,13 @@ function bindLibrary(rerender) {
     state.search = event.target.value;
     renderBooks();
   });
-  document.querySelector("#genreFilter")?.addEventListener("change", (event) => {
-    state.genreFilter = event.target.value;
-    renderBooks();
+  setupCustomSelect("genreFilter", (value) => {
+    state.genreFilter = value;
+    rerender();
   });
-  document.querySelector("#sortBy")?.addEventListener("change", (event) => {
-    state.sortBy = event.target.value;
-    renderBooks();
+  setupCustomSelect("sortBy", (value) => {
+    state.sortBy = value;
+    rerender();
   });
   document.querySelector("#cancelEdit")?.addEventListener("click", () => {
     state.editingId = null;
@@ -120,6 +120,25 @@ function bindLibrary(rerender) {
   document.querySelector("#bookForm")?.addEventListener("submit", submitBook);
   document.querySelector("#bookList")?.addEventListener("click", onBookAction);
   loadBooks();
+}
+
+function setupCustomSelect(id, onChange) {
+  const root = document.querySelector(`[data-custom-select="${id}"]`);
+  if (!root) return;
+  const trigger = root.querySelector("[data-select-trigger]");
+  const menu = root.querySelector("[data-select-menu]");
+  trigger?.addEventListener("click", () => {
+    document.querySelectorAll(".custom-select.open").forEach((item) => {
+      if (item !== root) item.classList.remove("open");
+    });
+    root.classList.toggle("open");
+  });
+  menu?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-select-option]");
+    if (!option) return;
+    root.classList.remove("open");
+    onChange(option.dataset.value);
+  });
 }
 
 async function submitBook(e) {

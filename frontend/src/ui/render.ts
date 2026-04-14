@@ -112,16 +112,23 @@ function renderPage(page) {
     </div>
     <div class="catalog-tools">
       <input id="searchInput" placeholder="Поиск по названию, автору, жанру" value="${state.search}" />
-      <select id="genreFilter">
-        <option value="all">Все жанры</option>
-        ${[...new Set(state.books.map((b) => b.genre).filter(Boolean))].map((genre) => `<option value="${genre}" ${state.genreFilter === genre ? "selected" : ""}>${genre}</option>`).join("")}
-      </select>
-      <select id="sortBy">
-        <option value="newest" ${state.sortBy === "newest" ? "selected" : ""}>Сначала новые</option>
-        <option value="oldest" ${state.sortBy === "oldest" ? "selected" : ""}>Сначала старые</option>
-        <option value="title" ${state.sortBy === "title" ? "selected" : ""}>По названию</option>
-        <option value="stock" ${state.sortBy === "stock" ? "selected" : ""}>По наличию</option>
-      </select>
+      ${customSelect(
+        "genreFilter",
+        state.genreFilter === "all" ? "Все жанры" : state.genreFilter,
+        [{ value: "all", label: "Все жанры" }, ...[...new Set(state.books.map((b) => b.genre).filter(Boolean))].map((genre) => ({ value: genre, label: genre }))],
+        state.genreFilter
+      )}
+      ${customSelect(
+        "sortBy",
+        sortLabel(state.sortBy),
+        [
+          { value: "newest", label: "Сначала новые" },
+          { value: "oldest", label: "Сначала старые" },
+          { value: "title", label: "По названию" },
+          { value: "stock", label: "По наличию" }
+        ],
+        state.sortBy
+      )}
       <button id="loadBooks">Обновить каталог</button>
     </div>
     <div class="grid-two">
@@ -129,6 +136,30 @@ function renderPage(page) {
       <article class="card glass"><div id="bookList" class="book-list"></div></article>
     </div>
   </section>`;
+}
+
+function customSelect(id, currentLabel, options, currentValue) {
+  return `<div class="custom-select" data-custom-select="${id}">
+    <button type="button" class="custom-select-trigger" data-select-trigger>
+      <span>${currentLabel}</span>
+      <span class="custom-caret"></span>
+    </button>
+    <div class="custom-select-menu" data-select-menu>
+      ${options
+        .map(
+          (opt) =>
+            `<button type="button" class="custom-option ${opt.value === currentValue ? "is-selected" : ""}" data-select-option data-value="${opt.value}">${opt.label}</button>`
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function sortLabel(value) {
+  if (value === "oldest") return "Сначала старые";
+  if (value === "title") return "По названию";
+  if (value === "stock") return "По наличию";
+  return "Сначала новые";
 }
 
 function loginForm() {
