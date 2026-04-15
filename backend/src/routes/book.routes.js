@@ -1,17 +1,29 @@
 const { Router } = require("express");
 const {
   listBooks,
-  createBook,
+  listGenres,
+  listFavoritesBatch,
+  listMyBooks,
+  getBookById,
+  createCatalogBook,
+  createPersonalBook,
   updateBook,
-  deleteBook
+  deleteBook,
+  getBookText
 } = require("../controllers/book.controller");
 const { requireAuth, requireRole } = require("../middleware/auth.middleware");
 
 const bookRouter = Router();
 
+bookRouter.get("/meta/genres", listGenres);
 bookRouter.get("/", listBooks);
-bookRouter.post("/", requireAuth, requireRole(["ADMIN", "LIBRARIAN"]), createBook);
-bookRouter.patch("/:id", requireAuth, requireRole(["ADMIN", "LIBRARIAN"]), updateBook);
-bookRouter.delete("/:id", requireAuth, requireRole(["ADMIN"]), deleteBook);
+bookRouter.get("/favorites/batch", requireAuth, listFavoritesBatch);
+bookRouter.get("/mine", requireAuth, listMyBooks);
+bookRouter.get("/:id/text", getBookText);
+bookRouter.get("/:id", getBookById);
+bookRouter.post("/", requireAuth, requireRole(["ADMIN", "LIBRARIAN"]), createCatalogBook);
+bookRouter.post("/personal", requireAuth, createPersonalBook);
+bookRouter.patch("/:id", requireAuth, updateBook);
+bookRouter.delete("/:id", requireAuth, deleteBook);
 
 module.exports = bookRouter;

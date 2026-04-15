@@ -10,6 +10,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "node prisma/seed.js",
     "prisma:import:real": "node prisma/import-openlibrary.js",
+    "prisma:import:gutendex": "node prisma/import-gutendex.js",
     "test": "jest --runInBand",
     "test:fuzz": "jest --runInBand tests/fuzz.auth.test.js"
   },

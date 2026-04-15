@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
-const { corsOrigin } = require("./config/env");
+const { corsOrigins } = require("./config/env");
 const authRouter = require("./routes/auth.routes");
 const bookRouter = require("./routes/book.routes");
 const errorHandler = require("./middleware/error.middleware");
@@ -10,7 +10,11 @@ const errorHandler = require("./middleware/error.middleware");
 const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: corsOrigin }));
+app.use(
+  cors({
+    origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins
+  })
+);
 app.use(express.json());
 app.use(morgan("dev"));
 
