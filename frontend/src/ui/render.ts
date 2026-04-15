@@ -1,5 +1,6 @@
 // @ts-nocheck
-import { ROLE_LABELS, canDeleteBooks, canManageBooks, state } from "../core/state";
+import { ROLE_LABELS, canEditThisBook, canDeleteThisBook, canManageCatalog, state } from "../core/state";
+import { bookTextUrl } from "../api/http";
 
 export function notify(message, kind = "info") {
   const holder = document.querySelector("#alerts");
@@ -8,10 +9,11 @@ export function notify(message, kind = "info") {
   node.className = `alert ${kind}`;
   node.textContent = message;
   holder.appendChild(node);
-  setTimeout(() => node.remove(), 3200);
+  setTimeout(() => node.remove(), 4200);
 }
 
 export function renderLayout(app, page) {
+  const authed = Boolean(state.token);
   app.innerHTML = `
   <main class="layout wide">
     <header class="topbar glass">
@@ -21,16 +23,33 @@ export function renderLayout(app, page) {
       </div>
       <nav class="tabs">
           <a href="/" data-nav class="${page === "/" ? "active" : ""}">Главная</a>
-          <a href="/auth" data-nav class="${page === "/auth" ? "active" : ""}">Вход</a>
+          <a href="/auth" data-nav class="${page === "/auth" ? "active" : ""}">${authed ? "Аккаунт" : "Вход"}</a>
           <a href="/library" data-nav class="${page === "/library" ? "active" : ""}">Библиотека</a>
+          ${authed ? `<a href="/personal" data-nav class="${page === "/personal" ? "active" : ""}">Личная библиотека</a>` : ""}
       </nav>
       <div class="hero-actions">
-        ${state.token ? `<button id="logout" class="secondary">Выйти</button>` : ""}
+        ${authed ? `<button id="logout" class="secondary">Выйти</button>` : ""}
       </div>
     </header>
     <section id="alerts" class="alerts"></section>
     ${renderPage(page)}
+    ${readModalMarkup()}
   </main>`;
+}
+
+function readModalMarkup() {
+  return `<div id="readBackdrop" class="read-backdrop" hidden>
+    <div class="read-dialog glass" role="dialog" aria-modal="true">
+      <div class="read-toolbar">
+        <h3 id="readTitle">Чтение</h3>
+        <div class="read-toolbar-actions">
+          <a id="readDownload" class="button-link" href="#" target="_blank" rel="noopener">Скачать .txt</a>
+          <button type="button" id="readClose" class="secondary">Закрыть</button>
+        </div>
+      </div>
+      <pre id="readBody" class="read-body"></pre>
+    </div>
+  </div>`;
 }
 
 function renderPage(page) {
@@ -39,45 +58,36 @@ function renderPage(page) {
       <div class="welcome-intro glass split">
         <div>
           <h2>Современное решение для управления библиотекой</h2>
-          <p>Library Nexus помогает быстро вести каталог, управлять доступом сотрудников и читателей, а также работать с фондом из единого интерфейса.</p>
+          <p>Library Nexus помогает вести электронный каталог, сохранять избранное и читать материалы прямо в браузере.</p>
           <button id="startNow">Начать работу</button>
         </div>
         <div class="hero-panel">
           <div class="hero-window">
-            <div class="hero-row"><span>Каталог</span><span>12 480 книг</span></div>
-            <div class="hero-row"><span>Пользователи</span><span>1 248 активных</span></div>
-            <div class="hero-row"><span>Выдачи</span><span>352 сегодня</span></div>
+            <div class="hero-row"><span>Каталог</span><span>Электронные издания</span></div>
+            <div class="hero-row"><span>Пользователи</span><span>Роли и доступ</span></div>
+            <div class="hero-row"><span>Чтение</span><span>В браузере и скачивание</span></div>
           </div>
         </div>
       </div>
       <div class="knowledge glass">
         <h3>Что вы получаете</h3>
         <div class="knowledge-grid">
-          <article><h4>Быстрый поиск</h4><p>Фильтрация по названию, автору и жанру в несколько кликов.</p></article>
-          <article><h4>Доступность</h4><p>Работа с библиотекой с любого устройства и в любое время.</p></article>
-          <article><h4>Систематизация</h4><p>Единая структура хранения материалов и истории выдач.</p></article>
-          <article><h4>Контроль ролей</h4><p>Права операций по ролям: читатель, библиотекарь, администратор.</p></article>
+          <article><h4>Быстрый поиск</h4><p>Фильтрация по названию, автору и жанру.</p></article>
+          <article><h4>Доступность</h4><p>Работа с каталогом с любого устройства.</p></article>
+          <article><h4>Личный кабинет</h4><p>Свои книги, избранное и загрузки в одной вкладке.</p></article>
+          <article><h4>Контроль ролей</h4><p>Библиотекарь ведёт фонд, читатель пользуется каталогом.</p></article>
         </div>
       </div>
       <div class="grid-3">
-        <article class="glass feature"><h3>Легкость использования</h3><p>Понятный интерфейс и быстрый старт без долгого обучения.</p></article>
-        <article class="glass feature"><h3>Совместная работа</h3><p>Сотрудники и читатели работают в единой системе.</p></article>
-        <article class="glass feature"><h3>Мобильность</h3><p>Адаптивный интерфейс для компьютера, планшета и телефона.</p></article>
+        <article class="glass feature"><h3>Легкость использования</h3><p>Понятный интерфейс и быстрый старт.</p></article>
+        <article class="glass feature"><h3>Электронный фонд</h3><p>Без «количества на полке» — только цифровые копии.</p></article>
+        <article class="glass feature"><h3>Мобильность</h3><p>Адаптивная вёрстка для телефона и планшета.</p></article>
       </div>
-      <section class="solutions glass">
-        <h3>Возможности платформы</h3>
-        <div class="solution-list">
-          <article><h4>Учет фонда</h4><p>Полный учет книг, ISBN, жанров и остатков.</p></article>
-          <article><h4>Операции выдачи</h4><p>Контроль выдач, сроков и возвратов по пользователям.</p></article>
-          <article><h4>Сегментация ролей</h4><p>Гибкое разграничение прав и защищенные операции.</p></article>
-          <article><h4>Отчетность</h4><p>Оперативные метрики по каталогу и активности.</p></article>
-        </div>
-      </section>
       <section class="faq glass">
         <h3>Частые вопросы</h3>
-        <details><summary>Можно ли работать без авторизации?</summary><p>Просмотр каталога доступен, а управление книгами — только после входа.</p></details>
-        <details><summary>Как добавить обложку?</summary><p>Можно вставить ссылку на изображение или загрузить файл прямо в форме.</p></details>
-        <details><summary>Есть ли мобильная версия?</summary><p>Да, интерфейс полностью адаптивен для телефона и планшета.</p></details>
+        <details><summary>Где добавить свою книгу?</summary><p>После входа откройте вкладку «Личная библиотека».</p></details>
+        <details><summary>Как читать?</summary><p>Кнопка «Читать» открывает текст; «Скачать» сохраняет файл.</p></details>
+        <details><summary>Кто может править каталог?</summary><p>Редактирование фонда — у библиотекаря и администратора.</p></details>
       </section>
     </section>`;
   }
@@ -95,27 +105,38 @@ function renderPage(page) {
       <article class="card glass status-card">
         <h2>Статус доступа</h2>
         <p>Текущая роль: <b>${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</b></p>
-        <p>Для добавления и редактирования книг требуется авторизация с ролью библиотекаря или администратора.</p>
+        <p>После входа доступна вкладка «Личная библиотека»: свои книги и избранное из каталога.</p>
       </article>
     </section>`;
   }
 
-  return `<section class="catalog glass">
+  if (page === "/personal") {
+    return renderPersonalPage();
+  }
+
+  return renderLibraryPage();
+}
+
+function renderLibraryPage() {
+  const genreOptions = [
+    { value: "all", label: "Все жанры" },
+    ...state.availableGenres.map((g) => ({ value: g, label: g }))
+  ];
+  return `<section class="catalog glass catalog-full">
     <div class="catalog-top">
       <h2>Каталог книг</h2>
-      <span>Роль: ${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</span>
+      <span class="catalog-role">Роль: ${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</span>
     </div>
-    <div class="library-stats">
-      <article><strong>${state.books.length}</strong><span>Всего книг</span></article>
-      <article><strong>${state.favorites.length}</strong><span>Избранное</span></article>
-      <article><strong>${state.books.filter((b) => b.inStock > 0).length}</strong><span>Доступно сейчас</span></article>
+    <div class="library-stats library-stats-2">
+      <article><strong>${state.catalogTotal || state.catalogItems.length}</strong><span>Всего в каталоге</span></article>
+      <article><strong>${state.catalogItems.length}</strong><span>Загружено на странице</span></article>
     </div>
-    <div class="catalog-tools">
-      <input id="searchInput" placeholder="Поиск по названию, автору, жанру" value="${state.search}" />
+    <div class="catalog-tools catalog-tools-row">
+      <input id="searchInput" placeholder="Поиск по названию, автору, жанру" value="${escapeAttr(state.search)}" />
       ${customSelect(
         "genreFilter",
         state.genreFilter === "all" ? "Все жанры" : state.genreFilter,
-        [{ value: "all", label: "Все жанры" }, ...[...new Set(state.books.map((b) => b.genre).filter(Boolean))].map((genre) => ({ value: genre, label: genre }))],
+        genreOptions,
         state.genreFilter
       )}
       ${customSelect(
@@ -124,18 +145,56 @@ function renderPage(page) {
         [
           { value: "newest", label: "Сначала новые" },
           { value: "oldest", label: "Сначала старые" },
-          { value: "title", label: "По названию" },
-          { value: "stock", label: "По наличию" }
+          { value: "title", label: "По названию" }
         ],
         state.sortBy
       )}
-      <button id="loadBooks">Обновить каталог</button>
+      <button type="button" id="reloadCatalog">Обновить каталог</button>
     </div>
-    <div class="grid-two">
-      <article class="card glass">${bookForm()}</article>
-      <article class="card glass"><div id="bookList" class="book-list"></div></article>
+    <div id="catalogScroll" class="catalog-scroll">
+      <div id="bookList" class="book-grid"></div>
+      <div id="catalogSentinel" class="catalog-sentinel" data-loading="${state.catalogLoading ? "1" : "0"}">
+        ${state.catalogLoading ? "<span>Загрузка…</span>" : state.catalogHasMore ? "<span>Прокрутите вниз</span>" : "<span>Все книги загружены</span>"}
+      </div>
     </div>
   </section>`;
+}
+
+function renderPersonalPage() {
+  const catalogSection = canManageCatalog()
+    ? `<article class="card glass personal-block">
+        <h3>${state.editingCatalogId ? "Редактировать книгу фонда" : "Добавить в общий каталог"}</h3>
+        <p class="hint">Только для библиотекаря: книга попадает в общий каталог (видна всем).</p>
+        ${catalogBookForm()}
+      </article>`
+    : "";
+
+  return `<section class="personal-page">
+    <div class="catalog-top personal-header">
+      <h2>Личная библиотека</h2>
+      <span>${escapeAttr(state.userFullName || "")}</span>
+    </div>
+    <div class="personal-grid">
+      <article class="card glass personal-block">
+        <h3>Избранное из каталога</h3>
+        <div id="favoriteList" class="book-grid personal-book-grid"></div>
+      </article>
+      <article class="card glass personal-block">
+        <h3>Мои книги</h3>
+        <p class="hint">Здесь только ваши загрузки; их можно править и удалять.</p>
+        ${personalBookForm()}
+        <div id="myBookList" class="book-grid personal-book-grid"></div>
+      </article>
+      ${catalogSection}
+    </div>
+  </section>`;
+}
+
+function escapeAttr(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
 }
 
 function customSelect(id, currentLabel, options, currentValue) {
@@ -148,7 +207,7 @@ function customSelect(id, currentLabel, options, currentValue) {
       ${options
         .map(
           (opt) =>
-            `<button type="button" class="custom-option ${opt.value === currentValue ? "is-selected" : ""}" data-select-option data-value="${opt.value}">${opt.label}</button>`
+            `<button type="button" class="custom-option ${opt.value === currentValue ? "is-selected" : ""}" data-select-option data-value="${escapeAttr(opt.value)}">${opt.label}</button>`
         )
         .join("")}
     </div>
@@ -158,23 +217,22 @@ function customSelect(id, currentLabel, options, currentValue) {
 function sortLabel(value) {
   if (value === "oldest") return "Сначала старые";
   if (value === "title") return "По названию";
-  if (value === "stock") return "По наличию";
   return "Сначала новые";
 }
 
 function loginForm() {
   return `<form id="loginForm">
-    <input name="email" type="email" placeholder="Email" required />
-    <input name="password" type="password" placeholder="Пароль" required minlength="8" />
+    <input name="email" type="email" placeholder="Email" required autocomplete="username" />
+    <input name="password" type="password" placeholder="Пароль" required minlength="8" autocomplete="current-password" />
     <button type="submit">Войти</button>
   </form>`;
 }
 
 function registerForm() {
   return `<form id="registerForm">
-    <input name="fullName" placeholder="ФИО" required minlength="3" />
-    <input name="email" type="email" placeholder="Email" required />
-    <input name="password" type="password" placeholder="Пароль" required minlength="8" />
+    <input name="fullName" placeholder="ФИО" required minlength="3" autocomplete="name" />
+    <input name="email" type="email" placeholder="Email" required autocomplete="email" />
+    <input name="password" type="password" placeholder="Пароль (от 8 символов)" required minlength="8" autocomplete="new-password" />
     <input type="hidden" name="role" id="registerRole" value="READER" />
     ${customSelect(
       "registerRole",
@@ -190,9 +248,32 @@ function registerForm() {
   </form>`;
 }
 
-function bookForm() {
-  return `<h3>${state.editingId ? "Редактировать книгу" : "Добавить книгу"}</h3>
-  <form id="bookForm">
+function personalBookForm() {
+  return `<h4>${state.editingId ? "Редактировать мою книгу" : "Добавить свою книгу"}</h4>
+  <form id="personalBookForm">
+    <input name="title" placeholder="Название" required />
+    <input name="author" placeholder="Автор" required />
+    <input name="year" type="number" min="1800" max="${new Date().getFullYear()}" required />
+    <input name="genre" placeholder="Жанр" required />
+    <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
+    <label class="file-label">
+      Загрузить обложку
+      <input name="coverFile" id="personalCoverFile" type="file" accept="image/*" />
+    </label>
+    <div id="personalCoverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
+      ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
+    </div>
+    <input name="textUrl" type="url" placeholder="Ссылка на полный текст (.txt), необязательно" />
+    <textarea name="contentText" rows="6" placeholder="Или вставьте текст книги сюда (до ~250 тыс. символов)"></textarea>
+    <div class="inline-actions">
+      <button type="submit">${state.editingId ? "Сохранить" : "Добавить"}</button>
+      <button type="button" id="cancelPersonalEdit" class="secondary">Сбросить</button>
+    </div>
+  </form>`;
+}
+
+function catalogBookForm() {
+  return `<form id="catalogBookForm">
     <input name="title" placeholder="Название" required />
     <input name="author" placeholder="Автор" required />
     <input name="isbn" placeholder="ISBN" required />
@@ -201,42 +282,109 @@ function bookForm() {
     <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
     <label class="file-label">
       Загрузить обложку
-      <input name="coverFile" id="coverFile" type="file" accept="image/*" />
+      <input name="coverFile" id="catalogCoverFile" type="file" accept="image/*" />
     </label>
-    <div id="coverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
-      ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр обложки" />` : "<span>Предпросмотр обложки</span>"}
+    <div id="catalogCoverPreview" class="cover-preview ${state.coverDraftCatalog ? "has-image" : ""}">
+      ${state.coverDraftCatalog ? `<img src="${state.coverDraftCatalog}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
-    <input name="inStock" type="number" min="0" max="999" required />
+    <input name="textUrl" type="url" placeholder="Ссылка на полный текст (.txt), необязательно" />
+    <textarea name="contentText" rows="4" placeholder="Или фрагмент/полный текст в каталоге"></textarea>
     <div class="inline-actions">
-      <button type="submit">${state.editingId ? "Сохранить изменения" : "Добавить книгу"}</button>
-      <button type="button" id="cancelEdit" class="secondary">Сбросить</button>
+      <button type="submit">${state.editingCatalogId ? "Сохранить в фонде" : "Добавить в фонд"}</button>
+      <button type="button" id="cancelCatalogEdit" class="secondary">Сбросить</button>
     </div>
   </form>`;
 }
 
-export function renderBooks() {
+export function bookHasReadableText(book) {
+  return Boolean((book.contentText && String(book.contentText).trim()) || (book.textUrl && String(book.textUrl).trim()));
+}
+
+export function buildBookCard(book, ctx) {
+  const fav = state.favorites.includes(book.id);
+  const canRead = bookHasReadableText(book);
+  const readBtn = canRead
+    ? `<button type="button" data-action="read" data-id="${book.id}" class="read-btn">Читать</button>`
+    : `<button type="button" class="secondary" disabled title="Нет текста">Нет текста</button>`;
+  const downloadBtn = canRead
+    ? `<a class="button-link small" href="${bookTextUrl(book.id, true)}" target="_blank" rel="noopener">Скачать</a>`
+    : "";
+
+  const favBtn = `<button type="button" data-action="favorite" data-id="${book.id}" class="${fav ? "active" : "secondary"}">${fav ? "В избранном" : "В избранное"}</button>`;
+
+  let actions = "";
+  if (ctx === "catalog" || ctx === "favorites") {
+    const showEdit = book.ownerUserId == null && canManageCatalog();
+    const showDelete = showEdit;
+    actions = `
+      <div class="card-actions">
+        ${readBtn}
+        ${downloadBtn}
+        ${favBtn}
+        ${showEdit ? `<button type="button" data-action="edit" data-id="${book.id}">Редактировать</button>` : ""}
+        ${showDelete ? `<button type="button" data-action="delete" data-id="${book.id}" class="secondary">Удалить</button>` : ""}
+      </div>`;
+  } else {
+    actions = `
+      <div class="card-actions">
+        ${readBtn}
+        ${downloadBtn}
+        <button type="button" data-action="edit-mine" data-id="${book.id}">Редактировать</button>
+        <button type="button" data-action="delete-mine" data-id="${book.id}" class="secondary">Удалить</button>
+      </div>`;
+  }
+
+  return `<article class="book-card">
+      ${book.coverUrl ? `<img class="book-cover" src="${book.coverUrl}" alt="" loading="lazy" />` : ""}
+      <h3>${book.title}</h3>
+      <p class="meta">${book.author} • ${book.genre}</p>
+      <p class="meta small">ISBN: ${book.isbn}</p>
+      <p class="meta small">Год: ${book.year}</p>
+      ${actions}
+    </article>`;
+}
+
+export function renderCatalogGrid() {
   const list = document.querySelector("#bookList");
   if (!list) return;
-  const q = state.search.trim().toLowerCase();
-  const filtered = state.books
-    .filter((book) => !q || [book.title, book.author, book.genre].join(" ").toLowerCase().includes(q))
-    .filter((book) => state.genreFilter === "all" || book.genre === state.genreFilter)
-    .sort((a, b) => {
-      if (state.sortBy === "oldest") return a.year - b.year;
-      if (state.sortBy === "title") return String(a.title).localeCompare(String(b.title), "ru");
-      if (state.sortBy === "stock") return b.inStock - a.inStock;
-      return b.id - a.id;
-    });
-  if (!filtered.length) return (list.innerHTML = `<p class="empty">Ничего не найдено.</p>`);
-  list.innerHTML = filtered.map((book) => `
-    <article class="book-card">
-      ${book.coverUrl ? `<img class="book-cover" src="${book.coverUrl}" alt="Обложка ${book.title}" />` : ""}
-      <h3>${book.title}</h3><p>${book.author} • ${book.genre}</p><p>ISBN: ${book.isbn}</p>
-      <p>Год: ${book.year} • В наличии: ${book.inStock}</p>
-      <div class="inline-actions">
-        <button data-action="favorite" data-id="${book.id}" class="${state.favorites.includes(book.id) ? "active" : "secondary"}">${state.favorites.includes(book.id) ? "В избранном" : "В избранное"}</button>
-        <button data-action="edit" data-id="${book.id}" ${!canManageBooks() ? "disabled" : ""}>Редактировать</button>
-        <button data-action="delete" data-id="${book.id}" class="secondary" ${!canDeleteBooks() ? "disabled" : ""}>Удалить</button>
-      </div>
-    </article>`).join("");
+  if (!state.catalogItems.length) {
+    list.innerHTML = `<p class="empty">Нет книг. Запустите импорт или обновите позже.</p>`;
+    return;
+  }
+  list.innerHTML = state.catalogItems.map((b) => buildBookCard(b, "catalog")).join("");
+}
+
+export function renderPersonalLists() {
+  const fav = document.querySelector("#favoriteList");
+  const mine = document.querySelector("#myBookList");
+  if (fav) {
+    if (!state.favoriteBooks.length) fav.innerHTML = `<p class="empty">Пока пусто — добавьте книги в избранное в каталоге.</p>`;
+    else fav.innerHTML = state.favoriteBooks.map((b) => buildBookCard(b, "favorites")).join("");
+  }
+  if (mine) {
+    if (!state.myBooks.length) mine.innerHTML = `<p class="empty">Вы ещё не добавляли свои книги.</p>`;
+    else mine.innerHTML = state.myBooks.map((b) => buildBookCard(b, "mine")).join("");
+  }
+}
+
+export function syncReadModal() {
+  const backdrop = document.querySelector("#readBackdrop");
+  const titleEl = document.querySelector("#readTitle");
+  const bodyEl = document.querySelector("#readBody");
+  const dl = document.querySelector("#readDownload");
+  if (!backdrop || !titleEl || !bodyEl) return;
+  if (state.readModalOpen) {
+    backdrop.removeAttribute("hidden");
+    backdrop.hidden = false;
+    titleEl.textContent = state.readModalTitle;
+    bodyEl.textContent = state.readModalText;
+    if (dl && state.readModalBookId) {
+      dl.href = bookTextUrl(state.readModalBookId, true);
+    }
+  } else {
+    backdrop.hidden = true;
+    backdrop.setAttribute("hidden", "");
+    bodyEl.textContent = "";
+    if (dl) dl.setAttribute("href", "#");
+  }
 }

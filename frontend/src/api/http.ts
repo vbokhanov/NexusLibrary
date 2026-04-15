@@ -18,3 +18,16 @@ export async function apiRequest(endpoint: string, options: RequestInit, token =
   if (response.status === 204) return null;
   return response.json();
 }
+
+export function bookTextUrl(bookId: number, download: boolean) {
+  return `${API_BASE}/books/${bookId}/text${download ? "?download=1" : ""}`;
+}
+
+export async function fetchBookPlainText(bookId: number) {
+  const response = await fetch(bookTextUrl(bookId, false));
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Не удалось загрузить текст");
+  }
+  return response.text();
+}

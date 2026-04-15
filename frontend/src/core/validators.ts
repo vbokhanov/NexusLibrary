@@ -8,12 +8,38 @@ export function validateBook(payload) {
     errors.push("Год: некорректное значение");
   }
   if (!payload.genre || payload.genre.trim().length < 2) errors.push("Жанр: минимум 2 символа");
-  if (!Number.isInteger(payload.inStock) || payload.inStock < 0 || payload.inStock > 999) {
-    errors.push("Количество: от 0 до 999");
-  }
-  if (payload.coverUrl && !/^https?:\/\//.test(payload.coverUrl) && !/^data:image\/[a-zA-Z+]+;base64,/.test(payload.coverUrl)) {
+  if (
+    payload.coverUrl &&
+    !/^https?:\/\//.test(payload.coverUrl) &&
+    !/^data:image\/[a-zA-Z+]+;base64,/.test(payload.coverUrl)
+  ) {
     errors.push("Обложка: нужна ссылка https://... или загруженный файл");
   }
+  if (payload.textUrl && String(payload.textUrl).trim() && !/^https?:\/\//.test(payload.textUrl)) {
+    errors.push("Текст: укажите ссылку https://... на .txt или оставьте пустым");
+  }
+  return errors;
+}
+
+export function validatePersonalBook(payload) {
+  const errors = [];
+  if (!payload.title || payload.title.trim().length < 2) errors.push("Название: минимум 2 символа");
+  if (!payload.author || payload.author.trim().length < 2) errors.push("Автор: минимум 2 символа");
+  if (!Number.isInteger(payload.year) || payload.year < 1800 || payload.year > new Date().getFullYear()) {
+    errors.push("Год: некорректное значение");
+  }
+  if (!payload.genre || payload.genre.trim().length < 2) errors.push("Жанр: минимум 2 символа");
+  if (
+    payload.coverUrl &&
+    !/^https?:\/\//.test(payload.coverUrl) &&
+    !/^data:image\/[a-zA-Z+]+;base64,/.test(payload.coverUrl)
+  ) {
+    errors.push("Обложка: нужна ссылка https://... или загруженный файл");
+  }
+  if (payload.textUrl && String(payload.textUrl).trim() && !/^https?:\/\//.test(payload.textUrl)) {
+    errors.push("Ссылка на текст: только https://... или пусто");
+  }
+  if (payload.contentText && String(payload.contentText).length > 250000) errors.push("Текст слишком длинный");
   return errors;
 }
 

@@ -6,28 +6,68 @@ export const ROLE_LABELS = {
   GUEST: "Гость"
 };
 
+function readUserId() {
+  const raw = localStorage.getItem("userId");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export const state = {
   token: localStorage.getItem("token") || "",
   role: localStorage.getItem("role") || "GUEST",
-  books: [],
+  userId: readUserId(),
+  userFullName: localStorage.getItem("userFullName") || "",
   search: "",
   genreFilter: "all",
   sortBy: "newest",
   editingId: null,
+  editingCatalogId: null,
   authTab: "login",
   coverDraft: "",
-  favorites: JSON.parse(localStorage.getItem("favorites") || "[]")
+  coverDraftCatalog: "",
+  favorites: JSON.parse(localStorage.getItem("favorites") || "[]"),
+  availableGenres: [],
+  catalogItems: [],
+  catalogTotal: 0,
+  catalogSkip: 0,
+  catalogHasMore: true,
+  catalogLoading: false,
+  myBooks: [],
+  favoriteBooks: [],
+  readModalOpen: false,
+  readModalBookId: null,
+  readModalTitle: "",
+  readModalText: ""
 };
 
 export function getCurrentPath() {
   const path = location.pathname || "/";
-  return ["/", "/auth", "/library"].includes(path) ? path : "/";
+  return ["/", "/auth", "/library", "/personal"].includes(path) ? path : "/";
 }
 
-export function canManageBooks() {
+/** Каталог библиотеки: добавление / правка записей фонда */
+export function canManageCatalog() {
   return ["ADMIN", "LIBRARIAN"].includes(state.role);
 }
 
+export function canEditThisBook(book) {
+  if (!book) return false;
+  if (book.ownerUserId != null && state.userId && book.ownerUserId === state.userId) return true;
+  if (book.ownerUserId == null && canManageCatalog()) return true;
+  return false;
+}
+
+export function canDeleteThisBook(book) {
+  return canEditThisBook(book);
+}
+
+/** @deprecated используйте canManageCatalog */
+export function canManageBooks() {
+  return canManageCatalog();
+}
+
+/** @deprecated используйте canDeleteThisBook */
 export function canDeleteBooks() {
-  return state.role === "ADMIN";
+  return canManageCatalog();
 }
