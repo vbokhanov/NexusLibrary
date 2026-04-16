@@ -69,6 +69,15 @@ async function listGenres(req, res, next) {
   }
 }
 
+async function getCatalogCount(req, res, next) {
+  try {
+    const total = await prisma.book.count({ where: { ownerUserId: null } });
+    return res.json({ total });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function listFavoritesBatch(req, res, next) {
   try {
     const raw = String(req.query.ids || "");
@@ -250,6 +259,7 @@ async function getBookText(req, res, next) {
 module.exports = {
   listBooks,
   listGenres,
+  getCatalogCount,
   listFavoritesBatch,
   listMyBooks,
   getBookById,

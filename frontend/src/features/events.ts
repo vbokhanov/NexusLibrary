@@ -8,6 +8,9 @@ let catalogObserver = null;
 let searchDebounceTimer = null;
 let readModalEscapeHandler = null;
 let lastCatalogInfiniteFetch = 0;
+let catalogScrollListener = null;
+let outsideSelectClickHandler = null;
+let toTopScrollHandler = null;
 
 function catalogPageSize() {
   if (typeof window === "undefined") return 10;
@@ -21,6 +24,8 @@ export function bindEvents({ page, navigate, rerender }) {
   bindNavigation(navigate);
   bindLogout(rerender);
   bindReadModalChrome();
+  bindGlobalCustomSelectClose();
+  bindToTopButton();
   if (page === "/") bindHome(navigate);
   if (page === "/auth") bindAuth(navigate, rerender);
   if (page === "/library") bindLibrary(rerender);
@@ -65,6 +70,37 @@ function bindReadModalChrome() {
     }
   };
   document.addEventListener("keydown", readModalEscapeHandler);
+}
+
+function bindGlobalCustomSelectClose() {
+  if (outsideSelectClickHandler) {
+    document.removeEventListener("mousedown", outsideSelectClickHandler);
+  }
+  outsideSelectClickHandler = (event) => {
+    if (event.button !== 0) return;
+    const inside = event.target.closest(".custom-select");
+    if (inside) return;
+    document.querySelectorAll(".custom-select.open").forEach((item) => item.classList.remove("open"));
+  };
+  document.addEventListener("mousedown", outsideSelectClickHandler);
+}
+
+function bindToTopButton() {
+  const btn = document.querySelector("#toTopBtn");
+  const appRoot = document.querySelector("#app");
+  if (!btn || !appRoot) return;
+  btn.addEventListener("click", () => {
+    appRoot.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  if (toTopScrollHandler) {
+    appRoot.removeEventListener("scroll", toTopScrollHandler);
+  }
+  toTopScrollHandler = () => {
+    if (appRoot.scrollTop > 420) btn.classList.add("is-visible");
+    else btn.classList.remove("is-visible");
+  };
+  appRoot.addEventListener("scroll", toTopScrollHandler, { passive: true });
+  toTopScrollHandler();
 }
 
 function onReadBackdropClick(e) {
@@ -191,7 +227,6 @@ async function fetchCatalogPage(reset) {
     });
     const data = await apiRequest(`/books?${params}`, { method: "GET" }, "");
     const items = Array.isArray(data.items) ? data.items : [];
-    state.catalogTotal = typeof data.total === "number" ? data.total : state.catalogTotal;
     if (reset) state.catalogItems = items;
     else state.catalogItems = state.catalogItems.concat(items);
     state.catalogSkip = state.catalogItems.length;
@@ -204,9 +239,21 @@ async function fetchCatalogPage(reset) {
   }
 }
 
+async function fetchCatalogTotal() {
+  try {
+    const data = await apiRequest("/books/meta/count", { method: "GET" }, "");
+    if (typeof data?.total === "number") {
+      state.catalogTotal = data.total;
+    }
+  } catch (_) {
+    /* ignore count errors, grid can still load */
+  }
+}
+
 function wireCatalogObserver() {
   catalogObserver?.disconnect();
   const sentinel = document.querySelector("#catalogSentinel");
+  const appRoot = document.querySelector("#app");
   if (!sentinel) return;
   catalogObserver = new IntersectionObserver(
     async (entries) => {
@@ -218,9 +265,28 @@ function wireCatalogObserver() {
       await fetchCatalogPage(false);
       if (state.catalogItems.length !== prevLen) renderCatalogGrid();
     },
-    { root: null, rootMargin: "0px 0px 180px 0px", threshold: 0.05 }
+    { root: appRoot || null, rootMargin: "0px 0px 220px 0px", threshold: 0.01 }
   );
   catalogObserver.observe(sentinel);
+}
+
+function ensureCatalogScrollFallback() {
+  const appRoot = document.querySelector("#app");
+  if (!appRoot) return;
+  if (catalogScrollListener) {
+    appRoot.removeEventListener("scroll", catalogScrollListener);
+  }
+  catalogScrollListener = async () => {
+    if (state.catalogLoading || !state.catalogHasMore) return;
+    const threshold = 220;
+    const remain = appRoot.scrollHeight - (appRoot.scrollTop + appRoot.clientHeight);
+    if (remain <= threshold) {
+      const prevLen = state.catalogItems.length;
+      await fetchCatalogPage(false);
+      if (state.catalogItems.length !== prevLen) renderCatalogGrid();
+    }
+  };
+  appRoot.addEventListener("scroll", catalogScrollListener, { passive: true });
 }
 
 function bindLibrary(rerender) {
@@ -251,6 +317,7 @@ function bindLibrary(rerender) {
 
   (async () => {
     try {
+      await fetchCatalogTotal();
       if (!state.availableGenres.length) {
         state.availableGenres = await apiRequest("/books/meta/genres", { method: "GET" }, "");
         rerender();
@@ -259,6 +326,7 @@ function bindLibrary(rerender) {
       await fetchCatalogPage(true);
       renderCatalogGrid();
       wireCatalogObserver();
+      ensureCatalogScrollFallback();
     } catch (error) {
       notify(parseApiError(error, "Не удалось загрузить каталог"), "error");
     }
@@ -289,6 +357,7 @@ async function deleteCatalogBook(id, options = { refreshLibrary: true }) {
   try {
     await apiRequest(`/books/${id}`, { method: "DELETE" }, state.token);
     notify("Книга удалена", "success");
+    await fetchCatalogTotal();
     if (options.refreshLibrary) {
       await fetchCatalogPage(true);
       renderCatalogGrid();
@@ -488,6 +557,7 @@ async function submitCatalogBook(e, rerender) {
       await apiRequest("/books", { method: "POST", body: JSON.stringify(payload) }, state.token);
       notify("Добавлено в фонд", "success");
     }
+    await fetchCatalogTotal();
     state.editingCatalogId = null;
     state.coverDraftCatalog = "";
     e.currentTarget.reset();
@@ -557,6 +627,22 @@ function setupCustomSelect(id, onChange) {
     root.classList.remove("open");
     onChange(option.dataset.value, option);
   });
+  menu?.addEventListener(
+    "wheel",
+    (event) => {
+      const el = menu;
+      if (!el) return;
+      // Не даем скроллу "протекать" на основной #app, пока курсор внутри dropdown
+      const delta = event.deltaY;
+      const prevTop = el.scrollTop;
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      const nextTop = Math.min(maxTop, Math.max(0, prevTop + delta));
+      el.scrollTop = nextTop;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    { passive: false }
+  );
 }
 
 function parseApiError(error, fallback) {
@@ -567,10 +653,20 @@ function parseApiError(error, fallback) {
     if (Array.isArray(parsed?.details) && parsed.details.length > 0) {
       const issue = parsed.details[0];
       const field = Array.isArray(issue?.path) ? issue.path.join(".") : "";
-      return field ? `Ошибка поля ${field}: ${issue.message}` : `Ошибка: ${issue.message}`;
+      if (field === "email") return "Email указан неверно. Пример: name@mail.com";
+      if (field === "password") return "Пароль слишком короткий. Минимум 8 символов.";
+      if (field === "fullName") return "ФИО слишком короткое. Введите минимум 3 символа.";
+      if (field === "role") return "Роль выбрана неверно. Выберите из списка.";
+      return field ? `Ошибка в поле «${field}»: ${issue.message}` : `Ошибка: ${issue.message}`;
+    }
+    if (String(parsed?.message || "").includes("Email is already used")) {
+      return "Этот email уже зарегистрирован. Войдите или используйте другой email.";
     }
     return parsed?.message || fallback;
   } catch (_) {
+    if (raw.includes("Email is already used")) {
+      return "Этот email уже зарегистрирован. Войдите или используйте другой email.";
+    }
     return raw || fallback;
   }
 }

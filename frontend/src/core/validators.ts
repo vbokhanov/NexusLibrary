@@ -44,14 +44,14 @@ export function validatePersonalBook(payload) {
 }
 
 export function validateLogin(payload) {
-  if (!String(payload.email || "").includes("@")) return "Введите корректный email";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(payload.email || "").trim())) return "Введите корректный email";
   if (String(payload.password || "").length < 8) return "Пароль минимум 8 символов";
   return "";
 }
 
 export function validateRegister(payload) {
   if (String(payload.fullName || "").trim().length < 3) return "ФИО слишком короткое";
-  if (!String(payload.email || "").includes("@")) return "Введите корректный email";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(payload.email || "").trim())) return "Введите корректный email";
   if (String(payload.password || "").length < 8) return "Пароль минимум 8 символов";
   return "";
 }

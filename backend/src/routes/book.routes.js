@@ -2,6 +2,7 @@ const { Router } = require("express");
 const {
   listBooks,
   listGenres,
+  getCatalogCount,
   listFavoritesBatch,
   listMyBooks,
   getBookById,
@@ -16,6 +17,7 @@ const { requireAuth, requireRole } = require("../middleware/auth.middleware");
 const bookRouter = Router();
 
 bookRouter.get("/meta/genres", listGenres);
+bookRouter.get("/meta/count", getCatalogCount);
 bookRouter.get("/", listBooks);
 bookRouter.get("/favorites/batch", requireAuth, listFavoritesBatch);
 bookRouter.get("/mine", requireAuth, listMyBooks);

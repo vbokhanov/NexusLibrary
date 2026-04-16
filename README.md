@@ -43,7 +43,11 @@
 ## Быстрый старт (Docker)
 1. Создайте `backend/.env` на основе `backend/.env.example`.
 2. Поднимите стек:
+
    - `docker compose up --build -d`
+   - `docker compose up -d`
+   - если меняли Dockerfile/зависимости: `docker compose up --build -d`
+
 3. Примените миграции и заполните демо-данные:
    - `docker compose exec backend npx prisma migrate deploy`
    - `docker compose exec backend npm run prisma:seed`
@@ -114,6 +118,16 @@ curl -X POST "http://localhost:4000/api/books/personal" \
   -H "Content-Type: application/json" \
   -d "{\"title\":\"Моя книга\",\"author\":\"Я\",\"year\":2025,\"genre\":\"Эссе\",\"contentText\":\"Текст книги\"}"
 ```
+
+
+## Если ошибка Docker Hub (TLS handshake timeout)
+- Сообщение вида `failed to fetch oauth token ... TLS handshake timeout` означает сетевую проблему доступа Docker daemon к Docker Hub.
+- Для запуска уже собранного проекта без скачивания образов используйте:
+  - `docker compose up -d`
+- Для проверки, что всё поднялось:
+  - `docker compose ps`
+  - `curl http://localhost:4000/api/health`
+
 
 ## UML и аналитика
 - Анализ предметной области: `docs/domain-analysis.md`

@@ -34,6 +34,7 @@ export function renderLayout(app, page) {
     <section id="alerts" class="alerts"></section>
     ${renderPage(page)}
     ${readModalMarkup()}
+    <button type="button" id="toTopBtn" class="to-top-btn" aria-label="Наверх" title="Наверх">↑</button>
   </main>`;
 }
 
@@ -127,9 +128,8 @@ function renderLibraryPage() {
       <h2>Каталог книг</h2>
       <span class="catalog-role">Роль: ${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</span>
     </div>
-    <div class="library-stats library-stats-2">
-      <article><strong>${state.catalogTotal || state.catalogItems.length}</strong><span>Всего в каталоге</span></article>
-      <article><strong>${state.catalogItems.length}</strong><span>Загружено на странице</span></article>
+    <div class="library-stats library-stats-single">
+      <article><strong>${state.catalogTotal}</strong><span>Всего в каталоге</span></article>
     </div>
     <div class="catalog-tools catalog-tools-row">
       <input id="searchInput" placeholder="Поиск по названию, автору, жанру" value="${escapeAttr(state.search)}" />
