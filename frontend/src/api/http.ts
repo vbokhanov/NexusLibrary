@@ -12,7 +12,10 @@ export async function apiRequest(endpoint: string, options: RequestInit, token =
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || "Request failed");
+    const error = new Error(text || "Request failed");
+    // @ts-ignore status is attached for consumers in plain JS mode
+    error.status = response.status;
+    throw error;
   }
 
   if (response.status === 204) return null;

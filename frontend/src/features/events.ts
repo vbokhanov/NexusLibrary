@@ -32,6 +32,42 @@ export function bindEvents({ page, navigate, rerender }) {
   if (page === "/personal") bindPersonal(navigate, rerender);
 }
 
+function clearSession() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("role");
+  localStorage.removeItem("userId");
+  localStorage.removeItem("userFullName");
+  localStorage.removeItem("userEmail");
+  state.token = "";
+  state.role = "GUEST";
+  state.userId = null;
+  state.userFullName = "";
+  state.userEmail = "";
+}
+
+function isUnauthorizedError(error) {
+  // @ts-ignore
+  if (Number(error?.status) === 401) return true;
+  const raw = String(error?.message || "");
+  if (!raw) return false;
+  if (raw.includes("Token invalid or expired") || raw.includes("No token provided")) return true;
+  try {
+    const parsed = JSON.parse(raw);
+    const msg = String(parsed?.message || "");
+    return msg.includes("Token invalid or expired") || msg.includes("No token provided");
+  } catch (_) {
+    return false;
+  }
+}
+
+function handleUnauthorized(rerender, navigate) {
+  clearSession();
+  notify("Сессия истекла. Войдите в аккаунт снова.", "warning");
+  if (typeof navigate === "function") navigate("/auth");
+  else if (typeof rerender === "function") rerender();
+  else window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 function bindNavigation(navigate) {
   document.querySelectorAll("[data-nav]").forEach((link) => {
     link.addEventListener("click", (event) => {
@@ -43,14 +79,7 @@ function bindNavigation(navigate) {
 
 function bindLogout(rerender) {
   document.querySelector("#logout")?.addEventListener("click", () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("userFullName");
-    state.token = "";
-    state.role = "GUEST";
-    state.userId = null;
-    state.userFullName = "";
+    clearSession();
     state.editingId = null;
     state.editingCatalogId = null;
     notify("Вы вышли из аккаунта", "info");
@@ -151,6 +180,12 @@ function bindHome(navigate) {
 }
 
 function bindAuth(navigate, rerender) {
+  if (state.token || state.role !== "GUEST") {
+    loadProfileStats(rerender);
+    document.querySelector("#goLibraryBtn")?.addEventListener("click", () => navigate("/library"));
+    document.querySelector("#goPersonalBtn")?.addEventListener("click", () => navigate("/personal"));
+    return;
+  }
   document.querySelector("#tabLogin")?.addEventListener("click", () => {
     state.authTab = "login";
     rerender();
@@ -177,6 +212,7 @@ function bindAuth(navigate, rerender) {
       notify("Вход выполнен", "success");
       navigate("/library");
     } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Ошибка входа: проверьте данные"), "error");
     }
   });
@@ -193,9 +229,36 @@ function bindAuth(navigate, rerender) {
       notify("Регистрация успешна", "success");
       navigate("/library");
     } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось зарегистрироваться"), "error");
     }
   });
+}
+
+async function loadProfileStats(rerender) {
+  if (state.profileStatsLoading || !state.token) return;
+  state.profileStatsLoading = true;
+  try {
+    const [mine, countResp] = await Promise.all([
+      apiRequest("/books/mine", { method: "GET" }, state.token),
+      apiRequest("/books/meta/count", { method: "GET" }, "")
+    ]);
+    const nextStats = {
+      favorites: state.favorites.length,
+      personalBooks: Array.isArray(mine) ? mine.length : 0,
+      catalogBooks: Number(countResp?.total || 0)
+    };
+    const changed =
+      nextStats.favorites !== state.profileStats.favorites ||
+      nextStats.personalBooks !== state.profileStats.personalBooks ||
+      nextStats.catalogBooks !== state.profileStats.catalogBooks;
+    state.profileStats = nextStats;
+    if (changed) rerender();
+  } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(rerender, null);
+  } finally {
+    state.profileStatsLoading = false;
+  }
 }
 
 function updateCatalogSentinel() {
@@ -232,6 +295,7 @@ async function fetchCatalogPage(reset) {
     state.catalogSkip = state.catalogItems.length;
     state.catalogHasMore = Boolean(data.hasMore);
   } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(null, null);
     notify(parseApiError(error, "Не удалось загрузить книги"), "error");
   } finally {
     state.catalogLoading = false;
@@ -363,6 +427,7 @@ async function deleteCatalogBook(id, options = { refreshLibrary: true }) {
       renderCatalogGrid();
     }
   } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(null, null);
     notify(parseApiError(error, "Не удалось удалить"), "error");
   }
 }
@@ -399,6 +464,7 @@ function bindPersonal(navigate, rerender) {
     try {
       await loadPersonalData();
     } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось загрузить данные"), "error");
     }
   })();
@@ -492,6 +558,7 @@ async function onPersonalListsClick(event, navigate, rerender) {
       await loadPersonalData();
       rerender();
     } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось удалить"), "error");
     }
     return;
@@ -534,6 +601,7 @@ async function submitPersonalBook(e, rerender) {
     await loadPersonalData();
     rerender();
   } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(rerender, null);
     notify(parseApiError(error, "Не удалось сохранить"), "error");
   }
 }
@@ -564,6 +632,7 @@ async function submitCatalogBook(e, rerender) {
     updateCatalogPreview();
     rerender();
   } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(rerender, null);
     notify(parseApiError(error, "Не удалось сохранить"), "error");
   }
 }
@@ -659,6 +728,9 @@ function parseApiError(error, fallback) {
       if (field === "role") return "Роль выбрана неверно. Выберите из списка.";
       return field ? `Ошибка в поле «${field}»: ${issue.message}` : `Ошибка: ${issue.message}`;
     }
+    if (String(parsed?.message || "").includes("External text source timed out")) {
+      return "Удаленный источник книги временно недоступен. Попробуйте еще раз: после успешной загрузки текст сохранится локально.";
+    }
     if (String(parsed?.message || "").includes("Email is already used")) {
       return "Этот email уже зарегистрирован. Войдите или используйте другой email.";
     }
@@ -676,10 +748,13 @@ function persistUser(data) {
   state.role = data.user.role || "READER";
   state.userId = data.user.id ?? null;
   state.userFullName = data.user.fullName || "";
+  state.userEmail = data.user.email || "";
+  state.profileStats.favorites = state.favorites.length;
   localStorage.setItem("token", state.token);
   localStorage.setItem("role", state.role);
   if (data.user.id != null) localStorage.setItem("userId", String(data.user.id));
   localStorage.setItem("userFullName", state.userFullName);
+  localStorage.setItem("userEmail", state.userEmail);
 }
 
 function toggleFavorite(id) {

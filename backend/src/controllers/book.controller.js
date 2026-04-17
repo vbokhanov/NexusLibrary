@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const { catalogBookSchema, personalBookSchema } = require("../validators/book.validator");
 
 const MAX_TEXT_FETCH_BYTES = 4 * 1024 * 1024;
+const REMOTE_TEXT_TIMEOUT_MS = 4500;
 
 function catalogWhereFromQuery(req) {
   const q = String(req.query.q || "").trim();
@@ -229,16 +230,30 @@ async function getBookText(req, res, next) {
     if (book.contentText && book.contentText.length) {
       text = book.contentText;
     } else if (book.textUrl) {
-      const response = await fetch(book.textUrl, {
-        headers: { "User-Agent": "LibraryNexusReader/1.0 (edu project)" },
-        redirect: "follow"
-      });
-      if (!response.ok) return res.status(502).json({ message: "Failed to fetch book text" });
-      const buf = Buffer.from(await response.arrayBuffer());
-      if (buf.length > MAX_TEXT_FETCH_BYTES) {
-        return res.status(413).json({ message: "Book text is too large" });
+      try {
+        const response = await fetch(book.textUrl, {
+          headers: { "User-Agent": "LibraryNexusReader/1.0 (edu project)" },
+          redirect: "follow",
+          signal: AbortSignal.timeout(REMOTE_TEXT_TIMEOUT_MS)
+        });
+        if (!response.ok) return res.status(502).json({ message: "Failed to fetch book text" });
+        const buf = Buffer.from(await response.arrayBuffer());
+        if (buf.length > MAX_TEXT_FETCH_BYTES) {
+          return res.status(413).json({ message: "Book text is too large" });
+        }
+        text = buf.toString("utf8");
+
+        // Cache fetched text locally so the next "read" or "download"
+        // does not depend on a flaky external server again.
+        await prisma.book.update({
+          where: { id: book.id },
+          data: { contentText: text }
+        });
+      } catch (error) {
+        return res.status(504).json({
+          message: "External text source timed out. Try again later or open another book."
+        });
       }
-      text = buf.toString("utf8");
     } else {
       return res.status(404).json({ message: "No text available for this book" });
     }

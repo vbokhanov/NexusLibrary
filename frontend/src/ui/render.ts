@@ -94,6 +94,37 @@ function renderPage(page) {
   }
 
   if (page === "/auth") {
+    if (isAuthed()) {
+      return `<section class="grid-two profile-grid">
+        <article class="card glass profile-card">
+          <div class="profile-hero">
+            <div class="profile-avatar">${profileInitials(state.userFullName)}</div>
+            <div class="profile-title">
+              <h2>${escapeAttr(state.userFullName || "Пользователь")}</h2>
+              <p>${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</p>
+            </div>
+          </div>
+          <div class="profile-meta">
+            <div class="profile-item"><span>Email</span><strong>${escapeAttr(state.userEmail || "—")}</strong></div>
+            <div class="profile-item"><span>ID</span><strong>${profileGameId(state.userId)}</strong></div>
+          </div>
+          <div class="profile-stats-grid">
+            <div class="profile-stat"><strong>${state.profileStats.catalogBooks}</strong><span>Книг в каталоге</span></div>
+            <div class="profile-stat"><strong>${state.profileStats.personalBooks}</strong><span>Личных книг</span></div>
+            <div class="profile-stat"><strong>${state.profileStats.favorites}</strong><span>В избранном</span></div>
+          </div>
+          <div class="inline-actions">
+            <button type="button" id="goLibraryBtn">Открыть библиотеку</button>
+            <button type="button" id="goPersonalBtn" class="secondary">Личная библиотека</button>
+          </div>
+        </article>
+        <article class="card glass status-card profile-side">
+          <h2>Аккаунт активен</h2>
+          <p>Вы уже авторизованы и можете пользоваться каталогом, чтением и личной библиотекой.</p>
+          <p>Для выхода используйте кнопку «Выйти» в шапке.</p>
+        </article>
+      </section>`;
+    }
     return `<section class="grid-two">
       <article class="card glass">
         <h2>Авторизация</h2>
@@ -172,7 +203,10 @@ function renderPersonalPage() {
   return `<section class="personal-page">
     <div class="catalog-top personal-header">
       <h2>Личная библиотека</h2>
-      <span>${escapeAttr(state.userFullName || "")}</span>
+      <div class="profile-mini">
+        <div class="profile-mini-avatar">${profileInitials(state.userFullName)}</div>
+        <span>${escapeAttr(state.userFullName || "Пользователь")}</span>
+      </div>
     </div>
     <div class="personal-grid">
       <article class="card glass personal-block">
@@ -188,6 +222,24 @@ function renderPersonalPage() {
       ${catalogSection}
     </div>
   </section>`;
+}
+
+function isAuthed() {
+  return Boolean(state.token || state.role !== "GUEST");
+}
+
+function profileInitials(fullName) {
+  const clean = String(fullName || "").trim();
+  if (!clean) return "U";
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0][0]?.toUpperCase() || "U";
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
+
+function profileGameId(userId) {
+  const id = Number(userId);
+  if (!Number.isInteger(id) || id <= 0) return "—";
+  return `607080${id}`;
 }
 
 function escapeAttr(s) {

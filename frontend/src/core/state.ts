@@ -13,11 +13,26 @@ function readUserId() {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+function readEmailFromToken() {
+  const token = localStorage.getItem("token") || "";
+  if (!token.includes(".")) return "";
+  try {
+    const payloadPart = token.split(".")[1] || "";
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="));
+    const payload = JSON.parse(decoded);
+    return String(payload?.email || "");
+  } catch (_) {
+    return "";
+  }
+}
+
 export const state = {
   token: localStorage.getItem("token") || "",
   role: localStorage.getItem("role") || "GUEST",
   userId: readUserId(),
   userFullName: localStorage.getItem("userFullName") || "",
+  userEmail: localStorage.getItem("userEmail") || readEmailFromToken(),
   search: "",
   genreFilter: "all",
   sortBy: "newest",
@@ -38,7 +53,13 @@ export const state = {
   readModalOpen: false,
   readModalBookId: null,
   readModalTitle: "",
-  readModalText: ""
+  readModalText: "",
+  profileStats: {
+    favorites: JSON.parse(localStorage.getItem("favorites") || "[]").length,
+    personalBooks: 0,
+    catalogBooks: 0
+  },
+  profileStatsLoading: false
 };
 
 export function getCurrentPath() {
