@@ -27,6 +27,29 @@ function readEmailFromToken() {
   }
 }
 
+function favoritesStorageKey(token, userId) {
+  if (token && Number.isInteger(userId) && userId > 0) return `favorites:user:${userId}`;
+  return "favorites:guest";
+}
+
+export function loadFavoritesForSession(token, userId) {
+  const key = favoritesStorageKey(token, userId);
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((v) => Number(v))
+      .filter((n) => Number.isInteger(n) && n > 0);
+  } catch (_) {
+    return [];
+  }
+}
+
+export function saveFavoritesForSession(token, userId, favorites) {
+  const key = favoritesStorageKey(token, userId);
+  localStorage.setItem(key, JSON.stringify(favorites));
+}
+
 export const state = {
   token: localStorage.getItem("token") || "",
   role: localStorage.getItem("role") || "GUEST",
@@ -41,7 +64,7 @@ export const state = {
   authTab: "login",
   coverDraft: "",
   coverDraftCatalog: "",
-  favorites: JSON.parse(localStorage.getItem("favorites") || "[]"),
+  favorites: loadFavoritesForSession(localStorage.getItem("token") || "", readUserId()),
   availableGenres: [],
   catalogItems: [],
   catalogTotal: 0,
@@ -55,12 +78,24 @@ export const state = {
   readModalTitle: "",
   readModalText: "",
   profileStats: {
-    favorites: JSON.parse(localStorage.getItem("favorites") || "[]").length,
+    favorites: loadFavoritesForSession(localStorage.getItem("token") || "", readUserId()).length,
     personalBooks: 0,
     catalogBooks: 0
   },
   profileStatsLoading: false
 };
+
+// Normalize stale localStorage state: no token means guest session.
+if (!state.token) {
+  state.role = "GUEST";
+  state.userId = null;
+  state.userFullName = "";
+  state.userEmail = "";
+  localStorage.removeItem("role");
+  localStorage.removeItem("userId");
+  localStorage.removeItem("userFullName");
+  localStorage.removeItem("userEmail");
+}
 
 export function getCurrentPath() {
   const path = location.pathname || "/";

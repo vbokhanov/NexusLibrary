@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { apiRequest, fetchBookPlainText } from "../api/http";
-import { canManageCatalog, state } from "../core/state";
+import { canManageCatalog, loadFavoritesForSession, saveFavoritesForSession, state } from "../core/state";
 import { validateBook, validateLogin, validatePersonalBook, validateRegister } from "../core/validators";
 import { notify, renderCatalogGrid, renderPersonalLists, syncReadModal } from "../ui/render";
 
@@ -43,6 +43,8 @@ function clearSession() {
   state.userId = null;
   state.userFullName = "";
   state.userEmail = "";
+  state.favorites = loadFavoritesForSession("", null);
+  state.profileStats.favorites = state.favorites.length;
 }
 
 function isUnauthorizedError(error) {
@@ -180,7 +182,7 @@ function bindHome(navigate) {
 }
 
 function bindAuth(navigate, rerender) {
-  if (state.token || state.role !== "GUEST") {
+  if (state.token) {
     loadProfileStats(rerender);
     document.querySelector("#goLibraryBtn")?.addEventListener("click", () => navigate("/library"));
     document.querySelector("#goPersonalBtn")?.addEventListener("click", () => navigate("/personal"));
@@ -459,6 +461,8 @@ function bindPersonal(navigate, rerender) {
   });
   document.querySelector("#favoriteList")?.addEventListener("click", (e) => onPersonalListsClick(e, navigate, rerender));
   document.querySelector("#myBookList")?.addEventListener("click", (e) => onPersonalListsClick(e, navigate, rerender));
+  setupComboSelect("personalGenre");
+  document.querySelector("#profileMiniBtn")?.addEventListener("click", () => navigate("/auth"));
 
   (async () => {
     try {
@@ -479,6 +483,13 @@ async function loadPersonalData() {
   if (favIds.length) {
     const batch = await apiRequest(`/books/favorites/batch?ids=${favIds.join(",")}`, { method: "GET" }, state.token);
     state.favoriteBooks = Array.isArray(batch) ? batch : [];
+    // Remove stale favorite IDs if books were deleted from catalog.
+    const validIds = state.favoriteBooks.map((b) => b.id);
+    if (validIds.length !== favIds.length) {
+      state.favorites = state.favorites.filter((id) => validIds.includes(id));
+      saveFavoritesForSession(state.token, state.userId, state.favorites);
+      state.profileStats.favorites = state.favorites.length;
+    }
   } else state.favoriteBooks = [];
 
   if (state.editingCatalogId) {
@@ -508,9 +519,12 @@ function fillPersonalForm(book) {
   form.title.value = book.title;
   form.author.value = book.author;
   form.year.value = book.year;
-  form.genre.value = book.genre;
+  const genreHidden = document.querySelector("#personalGenre");
+  if (genreHidden) genreHidden.value = book.genre || "";
+  const combo = document.querySelector('[data-combo-select="personalGenre"]');
+  const comboInput = combo?.querySelector("[data-combo-input]");
+  if (comboInput) comboInput.value = book.genre || "";
   form.coverUrl.value = book.coverUrl || "";
-  form.textUrl.value = book.textUrl || "";
   form.contentText.value = book.contentText || "";
   state.coverDraft = book.coverUrl || "";
   updatePersonalPreview();
@@ -582,7 +596,7 @@ async function submitPersonalBook(e, rerender) {
   const payload = Object.fromEntries(new FormData(e.currentTarget));
   payload.year = Number(payload.year);
   payload.coverUrl = state.coverDraft || String(payload.coverUrl || "").trim();
-  payload.textUrl = String(payload.textUrl || "").trim();
+  // textUrl removed from personal library UI
   payload.contentText = String(payload.contentText || "");
   const errors = validatePersonalBook(payload);
   if (errors.length) return notify(errors[0], "warning");
@@ -714,6 +728,76 @@ function setupCustomSelect(id, onChange) {
   );
 }
 
+function setupComboSelect(id) {
+  const root = document.querySelector(`[data-combo-select="${id}"]`);
+  if (!root) return;
+  const input = root.querySelector("[data-combo-input]");
+  const menu = root.querySelector("[data-combo-menu]");
+  const trigger = root.querySelector("[data-combo-trigger]");
+  const hidden = document.querySelector(`#${id}`);
+  if (!input || !menu || !hidden) return;
+
+  const open = () => root.classList.add("open");
+  const close = () => root.classList.remove("open");
+
+  const applyValue = (value) => {
+    hidden.value = value;
+    input.value = value;
+    close();
+  };
+
+  const filter = () => {
+    const q = String(input.value || "").trim().toLowerCase();
+    const options = menu.querySelectorAll("[data-combo-option]");
+    options.forEach((btn) => {
+      const val = String(btn.dataset.value || "").toLowerCase();
+      const match = !q || val.startsWith(q) || val.includes(q);
+      btn.style.display = match ? "" : "none";
+    });
+  };
+
+  trigger?.addEventListener("click", () => {
+    root.classList.toggle("open");
+    filter();
+  });
+
+  input.addEventListener("focus", () => {
+    open();
+    filter();
+  });
+
+  input.addEventListener("input", () => {
+    open();
+    filter();
+    hidden.value = String(input.value || "");
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") return close();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applyValue(String(input.value || "").trim());
+    }
+  });
+
+  menu.addEventListener("click", (e) => {
+    const opt = e.target.closest("[data-combo-option]");
+    if (!opt) return;
+    applyValue(opt.dataset.value);
+  });
+
+  // Wheel stays inside menu
+  menu.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      menu.scrollTop += event.deltaY;
+    },
+    { passive: false }
+  );
+}
+
 function parseApiError(error, fallback) {
   const raw = String(error?.message || "").trim();
   if (!raw) return fallback;
@@ -749,6 +833,7 @@ function persistUser(data) {
   state.userId = data.user.id ?? null;
   state.userFullName = data.user.fullName || "";
   state.userEmail = data.user.email || "";
+  state.favorites = loadFavoritesForSession(state.token, state.userId);
   state.profileStats.favorites = state.favorites.length;
   localStorage.setItem("token", state.token);
   localStorage.setItem("role", state.role);
@@ -765,7 +850,8 @@ function toggleFavorite(id) {
     state.favorites = [...state.favorites, id];
     notify("Добавлено в избранное", "success");
   }
-  localStorage.setItem("favorites", JSON.stringify(state.favorites));
+  saveFavoritesForSession(state.token, state.userId, state.favorites);
+  state.profileStats.favorites = state.favorites.length;
   renderCatalogGrid();
   renderPersonalLists();
 }

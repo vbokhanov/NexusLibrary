@@ -16,26 +16,55 @@ export function renderLayout(app, page) {
   const authed = Boolean(state.token);
   app.innerHTML = `
   <main class="layout wide">
-    <header class="topbar glass">
-      <div class="brand">
-        <span class="chip">Library Nexus</span>
-        <small>Digital Library Platform</small>
+    <section class="workspace-shell">
+      <div class="workspace-surface">
+        <header class="topbar glass">
+          <div class="brand">
+            <span class="chip">Library Nexus</span>
+            <small>Digital Library Platform</small>
+          </div>
+          <nav class="tabs">
+              <a href="/" data-nav class="${page === "/" ? "active" : ""}">Главная</a>
+              <a href="/auth" data-nav class="${page === "/auth" ? "active" : ""}">${authed ? "Аккаунт" : "Вход"}</a>
+              <a href="/library" data-nav class="${page === "/library" ? "active" : ""}">Библиотека</a>
+              ${authed ? `<a href="/personal" data-nav class="${page === "/personal" ? "active" : ""}">Личная библиотека</a>` : ""}
+          </nav>
+          <div class="hero-actions">
+            ${authed ? `<button id="logout" class="danger">Выйти</button>` : ""}
+          </div>
+        </header>
+        <section id="alerts" class="alerts"></section>
+        ${renderPage(page)}
+        ${renderFooter(page)}
       </div>
-      <nav class="tabs">
-          <a href="/" data-nav class="${page === "/" ? "active" : ""}">Главная</a>
-          <a href="/auth" data-nav class="${page === "/auth" ? "active" : ""}">${authed ? "Аккаунт" : "Вход"}</a>
-          <a href="/library" data-nav class="${page === "/library" ? "active" : ""}">Библиотека</a>
-          ${authed ? `<a href="/personal" data-nav class="${page === "/personal" ? "active" : ""}">Личная библиотека</a>` : ""}
-      </nav>
-      <div class="hero-actions">
-        ${authed ? `<button id="logout" class="secondary">Выйти</button>` : ""}
-      </div>
-    </header>
-    <section id="alerts" class="alerts"></section>
-    ${renderPage(page)}
+    </section>
     ${readModalMarkup()}
     <button type="button" id="toTopBtn" class="to-top-btn" aria-label="Наверх" title="Наверх">↑</button>
   </main>`;
+}
+
+function renderFooter(page) {
+  const year = new Date().getFullYear();
+  const scope =
+    page === "/"
+      ? "Главная"
+      : page === "/auth"
+        ? "Аккаунт"
+        : page === "/personal"
+          ? "Личная библиотека"
+          : "Каталог";
+  return `<footer class="footer glass">
+    <div class="footer-row">
+      <div class="footer-brand">
+        <strong>Library Nexus</strong>
+        <span>Электронная библиотека • ${scope}</span>
+      </div>
+      <div class="footer-meta">
+        <span>© ${year} Курсовой проект</span>
+        <span>Backend: Express + Prisma • Frontend: Vite</span>
+      </div>
+    </div>
+  </footer>`;
 }
 
 function readModalMarkup() {
@@ -203,10 +232,10 @@ function renderPersonalPage() {
   return `<section class="personal-page">
     <div class="catalog-top personal-header">
       <h2>Личная библиотека</h2>
-      <div class="profile-mini">
+      <button type="button" id="profileMiniBtn" class="profile-mini" title="Открыть аккаунт">
         <div class="profile-mini-avatar">${profileInitials(state.userFullName)}</div>
         <span>${escapeAttr(state.userFullName || "Пользователь")}</span>
-      </div>
+      </button>
     </div>
     <div class="personal-grid">
       <article class="card glass personal-block">
@@ -225,7 +254,7 @@ function renderPersonalPage() {
 }
 
 function isAuthed() {
-  return Boolean(state.token || state.role !== "GUEST");
+  return Boolean(state.token);
 }
 
 function profileInitials(fullName) {
@@ -305,8 +334,28 @@ function personalBookForm() {
   <form id="personalBookForm">
     <input name="title" placeholder="Название" required />
     <input name="author" placeholder="Автор" required />
-    <input name="year" type="number" min="1800" max="${new Date().getFullYear()}" required />
-    <input name="genre" placeholder="Жанр" required />
+    <input name="year" type="number" min="1800" max="${new Date().getFullYear()}" placeholder="Год" required />
+    <input type="hidden" name="genre" id="personalGenre" value="" />
+    ${comboSelect(
+      "personalGenre",
+      "Жанр (можно выбрать или ввести свой)",
+      [
+        "Роман",
+        "Фантастика",
+        "Фэнтези",
+        "Детектив",
+        "Приключения",
+        "Научпоп",
+        "Психология",
+        "Философия",
+        "История",
+        "Бизнес",
+        "Образование",
+        "Поэзия",
+        "Драма",
+        "Классика"
+      ]
+    )}
     <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
     <label class="file-label">
       Загрузить обложку
@@ -315,7 +364,6 @@ function personalBookForm() {
     <div id="personalCoverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
       ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
-    <input name="textUrl" type="url" placeholder="Ссылка на полный текст (.txt), необязательно" />
     <textarea name="contentText" rows="6" placeholder="Или вставьте текст книги сюда (до ~250 тыс. символов)"></textarea>
     <div class="inline-actions">
       <button type="submit">${state.editingId ? "Сохранить" : "Добавить"}</button>
@@ -324,6 +372,22 @@ function personalBookForm() {
   </form>`;
 }
 
+function comboSelect(id, placeholder, options) {
+  return `<div class="combo-select" data-combo-select="${id}">
+    <div class="combo-input-wrap">
+      <input type="text" class="combo-input" data-combo-input placeholder="${escapeAttr(placeholder)}" autocomplete="off" />
+      <button type="button" class="combo-caret" data-combo-trigger aria-label="Открыть список"></button>
+    </div>
+    <div class="combo-menu" data-combo-menu>
+      ${options
+        .map(
+          (label) =>
+            `<button type="button" class="combo-option" data-combo-option data-value="${escapeAttr(label)}">${label}</button>`
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
 function catalogBookForm() {
   return `<form id="catalogBookForm">
     <input name="title" placeholder="Название" required />
