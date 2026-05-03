@@ -28,7 +28,7 @@ Vite 5 + TypeScript · Express 5 + Prisma 6 + Zod 4 · PostgreSQL 16 · JWT · D
 
 ## Быстрый запуск
 
-Из корня репозитория (Git Bash / WSL / macOS / Linux):
+Из корня репозитория:
 
 ```bash
 cp backend/.env.example backend/.env
@@ -152,7 +152,7 @@ cd frontend && npm run playwright:install
 cd frontend && npm run test:e2e
 ```
 
-**Цепочка «всё подряд»** (корень репозитория; нужен shell с `&&`):
+**Цепочка «всё подряд»**:
 
 ```bash
 cd backend && npm test && cd ..
