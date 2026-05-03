@@ -105,7 +105,7 @@ docker compose down -v
 | После `prisma:seed` | `librarian@library.local` | `Librarian123!` |
 | После `prisma:seed` | `reader@library.local` | `Reader123!` |
 
-## Без Docker (локально)
+## Без Docker
 
 Нужны Node 20+ и свой Postgres. Порядок: `cd backend` → `npm install` → в `.env` свой `DATABASE_URL` → `npx prisma migrate deploy` → `npm run prisma:seed` → `npm run dev` · второй терминал: `cd frontend` → `npm install` → `npm run dev`. Импорт книг: `npm run prisma:import:gutendex -- 100` (из каталога `backend`).
 
