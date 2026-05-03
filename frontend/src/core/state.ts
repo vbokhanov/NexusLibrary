@@ -61,6 +61,8 @@ export const state = {
   sortBy: "newest",
   editingId: null,
   editingCatalogId: null,
+  /** Вкладки на /personal: favorites | my | publish */
+  personalTab: "favorites",
   authTab: "login",
   coverDraft: "",
   coverDraftCatalog: "",

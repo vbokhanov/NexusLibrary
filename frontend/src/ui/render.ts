@@ -7,7 +7,25 @@ import {
   canManageCatalog,
   state
 } from "../core/state";
-import { bookTextUrl } from "../api/http";
+import { bookCoverUrl, bookTextUrl } from "../api/http";
+
+/** Подсказки жанра: «Мои книги» и «Опубликовать в каталог» */
+const GENRE_COMBO_OPTIONS = [
+  "Роман",
+  "Фантастика",
+  "Фэнтези",
+  "Детектив",
+  "Приключения",
+  "Научпоп",
+  "Психология",
+  "Философия",
+  "История",
+  "Бизнес",
+  "Образование",
+  "Поэзия",
+  "Драма",
+  "Классика"
+];
 
 const MAX_TOASTS = 3;
 const TOAST_TTL_MS = 4200;
@@ -276,7 +294,7 @@ function renderLibraryPage() {
       <span class="catalog-role">Роль: ${ROLE_LABELS[state.role] || ROLE_LABELS.GUEST}</span>
     </div>
     <div class="library-stats library-stats-single">
-      <article><strong>${state.catalogTotal}</strong><span>Всего в каталоге</span></article>
+      <article><strong id="catalogTotalCount">${state.catalogTotal}</strong><span>Всего в каталоге</span></article>
     </div>
     <div class="catalog-tools catalog-tools-row">
       <input id="searchInput" placeholder="Поиск по названию, автору, жанру" value="${escapeAttr(state.search)}" />
@@ -308,7 +326,13 @@ function renderLibraryPage() {
 }
 
 function renderPersonalPage() {
-  const catalogSection = canManageCatalog()
+  const canPub = canManageCatalog();
+  let active = state.personalTab || "favorites";
+  if (!canPub && active === "publish") active = "favorites";
+  if (active !== "favorites" && active !== "my" && active !== "publish") active = "favorites";
+  state.personalTab = active;
+
+  const publishArticle = canPub
     ? `<article class="card glass personal-block">
         <h3>${state.editingCatalogId ? "Редактировать публикацию" : "Опубликовать книгу"}</h3>
         <p class="hint">Книга появится в общем каталоге для всех читателей. После сохранения обновите страницу каталога или откройте «Библиотека» — запись подтянется с сервера.</p>
@@ -324,19 +348,36 @@ function renderPersonalPage() {
         <span>${escapeAttr(state.userFullName || "Пользователь")}</span>
       </button>
     </div>
-    <div class="personal-grid">
+    <div class="personal-tabs" role="tablist" aria-label="Разделы личной библиотеки">
+      <button type="button" class="personal-tab${active === "favorites" ? " is-active" : ""}" role="tab" aria-selected="${active === "favorites"}" id="tabPersonalFavorites" data-personal-tab="favorites">Избранное из каталога</button>
+      <button type="button" class="personal-tab${active === "my" ? " is-active" : ""}" role="tab" aria-selected="${active === "my"}" id="tabPersonalMy" data-personal-tab="my">Мои книги</button>
+      ${
+        canPub
+          ? `<button type="button" class="personal-tab${active === "publish" ? " is-active" : ""}" role="tab" aria-selected="${active === "publish"}" id="tabPersonalPublish" data-personal-tab="publish">Опубликовать книгу</button>`
+          : ""
+      }
+    </div>
+    <div id="personalPanelFavorites" class="personal-tab-panel" role="tabpanel" aria-labelledby="tabPersonalFavorites"${active !== "favorites" ? " hidden" : ""}>
       <article class="card glass personal-block">
         <h3>Избранное из каталога</h3>
         <div id="favoriteList" class="book-grid personal-book-grid"></div>
       </article>
+    </div>
+    <div id="personalPanelMy" class="personal-tab-panel" role="tabpanel" aria-labelledby="tabPersonalMy"${active !== "my" ? " hidden" : ""}>
       <article class="card glass personal-block">
         <h3>Мои книги</h3>
         <p class="hint">Здесь только ваши загрузки; их можно править и удалять.</p>
         ${personalBookForm()}
         <div id="myBookList" class="book-grid personal-book-grid"></div>
       </article>
-      ${catalogSection}
     </div>
+    ${
+      canPub
+        ? `<div id="personalPanelPublish" class="personal-tab-panel" role="tabpanel" aria-labelledby="tabPersonalPublish"${active !== "publish" ? " hidden" : ""}>
+      ${publishArticle}
+    </div>`
+        : ""
+    }
   </section>`;
 }
 
@@ -344,7 +385,7 @@ function renderAdminPage() {
   if (!canAccessAdminPanel()) {
     return `<section class="personal-page"><p class="empty">Доступно только администратору.</p></section>`;
   }
-  return `<section class="personal-page admin-page">
+  return `<section class="personal-page admin-page admin-page--frame">
     <div class="catalog-top personal-header">
       <h2>Управление</h2>
       <button type="button" id="profileMiniBtn" class="profile-mini" title="Открыть аккаунт">
@@ -353,9 +394,9 @@ function renderAdminPage() {
       </button>
     </div>
     <div class="admin-grid">
-      <article class="card glass admin-block">
+      <article class="card glass admin-block admin-user-column">
         <h3>Пользователи</h3>
-        <p class="hint">Стрелки вверх/вниз и Enter — выбор в списке. Сгенерируйте код и передайте его будущему библиотекарю для регистрации.</p>
+        <p class="hint admin-user-hint">Стрелки вверх/вниз и Enter — выбор в списке. Сгенерируйте код и передайте его будущему библиотекарю для регистрации.</p>
         <div class="admin-toolbar">
           <input id="adminUserSearch" type="search" placeholder="Поиск по email или ФИО" autocomplete="off" />
           <button type="button" id="adminGenCodeBtn" class="secondary">Новый код (10 цифр)</button>
@@ -370,9 +411,10 @@ function renderAdminPage() {
           </div>
         </div>
       </article>
-      <article class="card glass admin-block" id="adminDetailCard">
+      <article class="card glass admin-block admin-detail-card" id="adminDetailCard">
         <h3>Данные пользователя</h3>
-        <p class="hint" id="adminDetailPlaceholder">Выберите строку в списке слева.</p>
+        <p class="hint admin-detail-placeholder" id="adminDetailPlaceholder" title="Выберите пользователя из списка слева">Выберите строку в списке слева.</p>
+        <div id="adminDetailIdleZone" class="admin-detail-idle-zone" hidden title="Выберите пользователя из списка слева" aria-hidden="true"></div>
         <form id="adminUserForm" class="admin-user-form" hidden>
           <input type="hidden" id="adminFormUserId" name="userId" value="" />
           <label class="admin-field"><span>ФИО</span><input name="fullName" id="adminFormFullName" type="text" required /></label>
@@ -492,26 +534,7 @@ function personalBookForm() {
     <input name="author" placeholder="Автор" required />
     <input name="year" class="input-year" type="number" min="500" max="${new Date().getFullYear()}" placeholder="Год" required />
     <input type="hidden" name="genre" id="personalGenre" value="" />
-    ${comboSelect(
-      "personalGenre",
-      "Жанр (можно выбрать или ввести свой)",
-      [
-        "Роман",
-        "Фантастика",
-        "Фэнтези",
-        "Детектив",
-        "Приключения",
-        "Научпоп",
-        "Психология",
-        "Философия",
-        "История",
-        "Бизнес",
-        "Образование",
-        "Поэзия",
-        "Драма",
-        "Классика"
-      ]
-    )}
+    ${comboSelect("personalGenre", "Жанр (можно выбрать или ввести свой)", GENRE_COMBO_OPTIONS)}
     <div class="cover-url-wrap" id="personalCoverUrlWrap">
       <input name="coverUrl" id="personalCoverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
       <div class="cover-url-custom-tip" id="personalCoverUrlTip" role="tooltip" aria-hidden="true">
@@ -537,7 +560,7 @@ function personalBookForm() {
     <div id="personalCoverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
       ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
-    <textarea name="contentText" rows="6" placeholder="Вставьте текст книги сюда (до ~250 тыс. символов)"></textarea>
+    <textarea name="contentText" class="book-content-textarea" rows="6" placeholder="Вставьте текст книги сюда (до ~3 млн символов)"></textarea>
     <div class="inline-actions">
       <button type="submit">${state.editingId ? "Сохранить" : "Добавить"}</button>
       <button type="button" id="cancelPersonalEdit" class="secondary">Сбросить</button>
@@ -566,18 +589,35 @@ function catalogBookForm() {
     <input name="title" placeholder="Название" required />
     <input name="author" placeholder="Автор" required />
     <input name="isbn" placeholder="ISBN" required />
-    <input name="year" class="input-year" type="number" min="1800" max="${new Date().getFullYear()}" required />
-    <input name="genre" placeholder="Жанр" required />
-    <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
-    <label class="file-label">
-      Загрузить обложку
-      <input name="coverFile" id="catalogCoverFile" type="file" accept="image/*" />
-    </label>
+    <input name="year" class="input-year" type="number" min="500" max="${new Date().getFullYear()}" placeholder="Год" required />
+    <input type="hidden" name="genre" id="catalogGenre" value="" />
+    ${comboSelect("catalogGenre", "Жанр (можно выбрать или ввести свой)", GENRE_COMBO_OPTIONS)}
+    <div class="cover-url-wrap" id="catalogCoverUrlWrap">
+      <input name="coverUrl" id="catalogCoverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
+      <div class="cover-url-custom-tip" id="catalogCoverUrlTip" role="tooltip" aria-hidden="true">
+        Сначала удалите файл обложки, чтобы указать ссылку из интернета.
+      </div>
+    </div>
+    <div class="file-block file-block-catalog">
+      <div class="file-block-heading">Загрузить обложку</div>
+      <div class="file-personal-row-wrap" id="catalogCoverFileRowWrap">
+        <div class="file-personal-row">
+          <label class="file-fake-btn file-fake-btn-row">
+            <input name="coverFile" id="catalogCoverFile" type="file" accept="image/*" class="input-file-overlay" />
+            <span data-catalog-file-btn-text>Выбрать файл</span>
+          </label>
+          <button type="button" id="catalogCoverFileRemove" class="file-remove-btn secondary" hidden>Удалить файл</button>
+        </div>
+        <div class="cover-url-custom-tip file-cover-row-tip" id="catalogCoverFileTip" role="tooltip" aria-hidden="true">
+          Сначала очистите поле со ссылкой на обложку, чтобы загрузить файл с компьютера.
+        </div>
+      </div>
+      <div id="catalogCoverFileStatus" class="file-status-text" aria-live="polite"></div>
+    </div>
     <div id="catalogCoverPreview" class="cover-preview ${state.coverDraftCatalog ? "has-image" : ""}">
       ${state.coverDraftCatalog ? `<img src="${state.coverDraftCatalog}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
-    <input name="textUrl" type="url" placeholder="Ссылка на полный текст (.txt), необязательно" />
-    <textarea name="contentText" rows="4" placeholder="Фрагмент или полный текст в каталоге"></textarea>
+    <textarea name="contentText" class="book-content-textarea" rows="6" placeholder="Вставьте текст книги сюда (до ~3 млн символов) или краткое описание"></textarea>
     <div class="inline-actions">
       <button type="submit">${state.editingCatalogId ? "Сохранить публикацию" : "Опубликовать"}</button>
       <button type="button" id="cancelCatalogEdit" class="secondary">Сбросить</button>
@@ -623,8 +663,18 @@ export function buildBookCard(book, ctx) {
       </div>`;
   }
 
+  const coverRaw = String(book.coverUrl || "").trim();
+  const bid = Number(book.id);
+  const coverSrc = !coverRaw
+    ? ""
+    : coverRaw.startsWith("data:image/")
+      ? coverRaw
+      : Number.isInteger(bid) && bid > 0
+        ? bookCoverUrl(bid)
+        : coverRaw;
+
   return `<article class="book-card">
-      ${book.coverUrl ? `<img class="book-cover" src="${book.coverUrl}" alt="" loading="lazy" />` : ""}
+      ${coverSrc ? `<img class="book-cover" src="${coverSrc.startsWith("data:") ? escapeAttr(coverSrc) : coverSrc}" alt="" loading="lazy" />` : ""}
       <h3>${book.title}</h3>
       <p class="meta">${book.author} • ${book.genre}</p>
       <p class="meta small">ISBN: ${book.isbn}</p>
@@ -693,7 +743,8 @@ export function renderAdminUserListDom() {
       .join("");
   }
   if (label) {
-    label.textContent = `Страница ${state.adminUi.page} из ${state.adminUi.pages || 1} · всего ${state.adminUi.total}`;
+    const lim = Number(state.adminUi.limit) || 12;
+    label.textContent = `Страница ${state.adminUi.page} из ${state.adminUi.pages || 1} · всего ${state.adminUi.total} · на одной странице максимум ${lim} пользователей`;
   }
 }
 

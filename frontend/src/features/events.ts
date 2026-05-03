@@ -22,16 +22,80 @@ let catalogObserver = null;
 let searchDebounceTimer = null;
 let readModalEscapeHandler = null;
 let lastCatalogInfiniteFetch = 0;
+/** Увеличивается при полном сбросе каталога; позволяет отбросить ответ «старого» запроса. */
+let catalogFetchEpoch = 0;
 let catalogScrollListener = null;
 let outsideSelectClickHandler = null;
 let toTopScrollHandler = null;
 let dropdownKbHandler = null;
+let bookContentScrollTrapWired = false;
 
 const customSelectHandlers = new Map();
+
+/** Пиксельные дельты wheel (учёт deltaMode для Firefox и др.). */
+function wheelPixelDeltas(e, el) {
+  if (e.deltaMode === 1) return { dx: e.deltaX * 16, dy: e.deltaY * 16 };
+  if (e.deltaMode === 2) return { dx: e.deltaX * el.clientWidth, dy: e.deltaY * el.clientHeight };
+  return { dx: e.deltaX, dy: e.deltaY };
+}
+
+/** Колёсико/тачпад и навигационные клавиши не «пробрасываются» наружу, пока фокус в поле текста книги или в блоке чтения. */
+function bindBookContentScrollTrap() {
+  if (bookContentScrollTrapWired) return;
+  bookContentScrollTrapWired = true;
+  document.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.ctrlKey || e.metaKey) return;
+      const t = e.target;
+      let host = null;
+      if (t instanceof HTMLTextAreaElement && t.classList.contains("book-content-textarea")) host = t;
+      else if (t instanceof Element) {
+        const rb = t.closest(".read-body");
+        if (rb instanceof HTMLElement) {
+          const backdrop = rb.closest(".read-backdrop");
+          if (backdrop?.hasAttribute("hidden")) return;
+          host = rb;
+        }
+      }
+      if (!host) return;
+      const { dx, dy } = wheelPixelDeltas(e, host);
+      if (dx === 0 && dy === 0) return;
+      const st = host.scrollTop;
+      const sl = host.scrollLeft;
+      const maxY = Math.max(0, host.scrollHeight - host.clientHeight);
+      const maxX = Math.max(0, host.scrollWidth - host.clientWidth);
+      host.scrollTop = Math.min(maxY, Math.max(0, st + dy));
+      host.scrollLeft = Math.min(maxX, Math.max(0, sl + dx));
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { capture: true, passive: false }
+  );
+
+  const app = document.getElementById("app");
+  if (app) {
+    app.addEventListener(
+      "keydown",
+      (e) => {
+        if (!(e.target instanceof HTMLTextAreaElement) || !e.target.classList.contains("book-content-textarea")) return;
+        const k = e.key;
+        if (!/^(Arrow(Up|Down|Left|Right)|Home|End|PageUp|PageDown)$/.test(k)) return;
+        e.stopPropagation();
+      },
+      false
+    );
+  }
+}
 
 function visibleMenuOptions(menu, selector) {
   if (!menu) return [];
   return [...menu.querySelectorAll(selector)].filter((el) => el.offsetParent !== null);
+}
+
+function visibleComboOptionButtons(menu) {
+  if (!menu) return [];
+  return [...menu.querySelectorAll("[data-combo-option]")].filter((btn) => btn.style.display !== "none");
 }
 
 function syncCustomSelectKbHighlight(root) {
@@ -44,7 +108,7 @@ function syncCustomSelectKbHighlight(root) {
 }
 
 function syncComboKbHighlight(menu) {
-  const opts = visibleMenuOptions(menu, "[data-combo-option]");
+  const opts = visibleComboOptionButtons(menu);
   opts.forEach((o) => o.classList.remove("is-kb-active"));
   if (opts[0]) opts[0].classList.add("is-kb-active");
 }
@@ -129,6 +193,7 @@ export function bindEvents({ page, navigate, rerender }) {
   bindReadModalChrome();
   bindGlobalCustomSelectClose();
   bindDropdownKeyboard();
+  bindBookContentScrollTrap();
   bindToTopButton();
   if (page === "/") bindHome(navigate);
   if (page === "/auth") bindAuth(navigate, rerender);
@@ -407,6 +472,10 @@ function bindAuth(navigate, rerender) {
     if (roleInput) roleInput.value = value;
     const labelNode = document.querySelector('[data-custom-select="registerRole"] [data-select-trigger] span');
     if (labelNode) labelNode.textContent = option?.textContent || "Читатель";
+    if (String(value || "").toUpperCase() !== "LIBRARIAN") {
+      const codeIn = document.querySelector("#registerLibrarianCode");
+      if (codeIn) codeIn.value = "";
+    }
     syncRegisterLibrarianWrap();
   });
   queueMicrotask(() => syncRegisterLibrarianWrap());
@@ -481,13 +550,16 @@ function updateCatalogSentinel() {
 }
 
 async function fetchCatalogPage(reset) {
-  if (state.catalogLoading) return;
+  if (state.catalogLoading && !reset) return;
+  if (!reset && !state.catalogHasMore) return;
+
+  const epochAtStart = reset ? ++catalogFetchEpoch : catalogFetchEpoch;
   if (reset) {
     lastCatalogInfiniteFetch = 0;
     state.catalogItems = [];
     state.catalogSkip = 0;
     state.catalogHasMore = true;
-  } else if (!state.catalogHasMore) return;
+  }
 
   state.catalogLoading = true;
   updateCatalogSentinel();
@@ -500,6 +572,7 @@ async function fetchCatalogPage(reset) {
       genre: state.genreFilter
     });
     const data = await apiRequest(`/books?${params}`, { method: "GET" }, "");
+    if (epochAtStart !== catalogFetchEpoch) return;
     const items = Array.isArray(data.items) ? data.items : [];
     if (reset) state.catalogItems = items;
     else state.catalogItems = state.catalogItems.concat(items);
@@ -566,8 +639,11 @@ function ensureCatalogScrollFallback() {
 
 function bindLibrary(rerender) {
   document.querySelector("#reloadCatalog")?.addEventListener("click", async () => {
+    await fetchCatalogTotal();
     await fetchCatalogPage(true);
     renderCatalogGrid();
+    const totalEl = document.querySelector("#catalogTotalCount");
+    if (totalEl) totalEl.textContent = String(state.catalogTotal);
   });
 
   document.querySelector("#searchInput")?.addEventListener("input", (event) => {
@@ -593,6 +669,8 @@ function bindLibrary(rerender) {
   (async () => {
     try {
       await fetchCatalogTotal();
+      const totalEl = document.querySelector("#catalogTotalCount");
+      if (totalEl) totalEl.textContent = String(state.catalogTotal);
       if (!state.availableGenres.length) {
         state.availableGenres = await apiRequest("/books/meta/genres", { method: "GET" }, "");
         rerender();
@@ -643,12 +721,51 @@ async function deleteCatalogBook(id, options = { refreshLibrary: true }) {
   }
 }
 
+function syncPersonalTabPanels() {
+  const canPub = canManageCatalog();
+  let t = state.personalTab || "favorites";
+  if (!canPub && t === "publish") t = "favorites";
+  if (t !== "favorites" && t !== "my" && t !== "publish") t = "favorites";
+  state.personalTab = t;
+
+  document.querySelectorAll(".personal-tabs [data-personal-tab]").forEach((btn) => {
+    const id = btn.getAttribute("data-personal-tab");
+    const on = id === t;
+    btn.classList.toggle("is-active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  const fav = document.querySelector("#personalPanelFavorites");
+  const my = document.querySelector("#personalPanelMy");
+  const pub = document.querySelector("#personalPanelPublish");
+  if (fav) fav.hidden = t !== "favorites";
+  if (my) my.hidden = t !== "my";
+  if (pub) pub.hidden = t !== "publish";
+}
+
 function bindPersonal(navigate, rerender) {
   if (!state.token) {
     notify("Войдите, чтобы открыть личную библиотеку", "warning");
     navigate("/auth");
     return;
   }
+
+  document.querySelector(".personal-tabs")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-personal-tab]");
+    if (!btn) return;
+    const key = btn.getAttribute("data-personal-tab");
+    if (!key || (!canManageCatalog() && key === "publish")) return;
+    state.personalTab = key;
+    syncPersonalTabPanels();
+    try {
+      if (key === "favorites") await loadPersonalData({ mine: false, favorites: true });
+      else if (key === "my") await loadPersonalData({ mine: true, favorites: false });
+      else await loadPersonalData({ mine: true, favorites: true });
+    } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+      notify(parseApiError(error, "Не удалось обновить данные"), "error");
+    }
+  });
+  queueMicrotask(() => syncPersonalTabPanels());
 
   document.querySelector("#personalBookForm")?.addEventListener("submit", (e) => submitPersonalBook(e, rerender));
   document.querySelector("#catalogBookForm")?.addEventListener("submit", (e) => submitCatalogBook(e, rerender));
@@ -666,9 +783,17 @@ function bindPersonal(navigate, rerender) {
     updatePersonalPreview();
     updatePersonalFormChrome();
   });
+  document.querySelector("#catalogCoverUrl")?.addEventListener("input", () => onCatalogCoverUrlInput());
   document.querySelector("#catalogCoverFile")?.addEventListener("change", (event) =>
     onCoverFile(event, "catalog")
   );
+  document.querySelector("#catalogCoverFileRemove")?.addEventListener("click", () => {
+    state.coverDraftCatalog = "";
+    const fin = document.querySelector("#catalogCoverFile");
+    if (fin) fin.value = "";
+    updateCatalogPreview();
+    updateCatalogFormChrome();
+  });
   document.querySelector("#cancelPersonalEdit")?.addEventListener("click", () => {
     state.editingId = null;
     state.coverDraft = "";
@@ -682,13 +807,15 @@ function bindPersonal(navigate, rerender) {
   document.querySelector("#favoriteList")?.addEventListener("click", (e) => onPersonalListsClick(e, navigate, rerender));
   document.querySelector("#myBookList")?.addEventListener("click", (e) => onPersonalListsClick(e, navigate, rerender));
   setupComboSelect("personalGenre");
+  setupComboSelect("catalogGenre");
   document.querySelector("#profileMiniBtn")?.addEventListener("click", () => navigate("/auth"));
 
   (async () => {
     try {
-      const favoritesNeedFetch = state.favorites.length > 0 && state.favoriteBooks.length === 0;
-      await loadPersonalData({ mine: true, favorites: favoritesNeedFetch });
+      await loadPersonalData({ mine: true, favorites: true });
       updatePersonalFormChrome();
+      updateCatalogFormChrome();
+      syncPersonalTabPanels();
     } catch (error) {
       if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось загрузить данные"), "error");
@@ -746,9 +873,102 @@ async function loadPersonalData(options = { mine: true, favorites: true }) {
     else state.editingId = null;
   }
 
-  // Всегда перерисовываем оба списка из state (после полного rerender DOM пустой; без лишнего запроса избранного).
   renderPersonalFavoritesListOnly();
   renderPersonalMyBooksListOnly();
+}
+
+function catalogCoverFlags() {
+  const form = document.querySelector("#catalogBookForm");
+  const coverUrlInput = document.querySelector("#catalogCoverUrl");
+  const fileInput = document.querySelector("#catalogCoverFile");
+  const urlTrim = String(coverUrlInput?.value || "").trim();
+  const draft = String(state.coverDraftCatalog || "").trim();
+  const hasHttpLink = urlTrim.length > 0;
+  const hasFileCover = /^data:image\//i.test(draft) || Boolean(fileInput?.files?.length);
+  return { form, coverUrlInput, fileInput, urlTrim, draft, hasHttpLink, hasFileCover };
+}
+
+function syncCatalogCoverFileStatus() {
+  const el = document.querySelector("#catalogCoverFileStatus");
+  if (!el) return;
+  const { fileInput, hasHttpLink, hasFileCover, draft } = catalogCoverFlags();
+  if (hasHttpLink) {
+    el.textContent = "Указана ссылка на обложку — загрузка файла отключена.";
+    return;
+  }
+  if (hasFileCover) {
+    if (/^data:image\//i.test(draft)) {
+      el.textContent = "Обложка из файла — можно заменить или удалить файл.";
+    } else if (fileInput?.files?.length) {
+      el.textContent = `Выбран файл: ${fileInput.files[0].name}`;
+    } else {
+      el.textContent = "Обложка из файла — можно заменить или удалить файл.";
+    }
+    return;
+  }
+  if (draft && !/^data:image\//i.test(draft)) {
+    el.textContent = "Используется ссылка на обложку — файл не обязателен.";
+    return;
+  }
+  el.textContent = "Файл не обязателен, если указана ссылка на обложку.";
+}
+
+function updateCatalogFormChrome() {
+  if (!document.querySelector("#catalogBookForm")) return;
+  const fileBtn = document.querySelector("[data-catalog-file-btn-text]");
+  if (fileBtn) {
+    const draft = String(state.coverDraftCatalog || "").trim();
+    fileBtn.textContent = /^data:image\//i.test(draft) ? "Изменить файл" : "Выбрать файл";
+  }
+  const { coverUrlInput, fileInput, hasHttpLink, hasFileCover } = catalogCoverFlags();
+  const fileBlock = document.querySelector(".file-block-catalog");
+  const removeBtn = document.querySelector("#catalogCoverFileRemove");
+  const coverUrlWrap = document.querySelector("#catalogCoverUrlWrap");
+  const coverUrlTip = document.querySelector("#catalogCoverUrlTip");
+  if (coverUrlInput) {
+    coverUrlInput.readOnly = hasFileCover;
+    coverUrlInput.removeAttribute("title");
+    if (hasFileCover) {
+      coverUrlInput.setAttribute("aria-describedby", "catalogCoverUrlTip");
+    } else {
+      coverUrlInput.removeAttribute("aria-describedby");
+    }
+  }
+  coverUrlWrap?.classList.toggle("is-file-lock-tip", hasFileCover);
+  if (coverUrlTip) {
+    coverUrlTip.setAttribute("aria-hidden", hasFileCover ? "false" : "true");
+  }
+  const fileRowWrap = document.querySelector("#catalogCoverFileRowWrap");
+  const fileTip = document.querySelector("#catalogCoverFileTip");
+  if (fileInput) {
+    fileInput.disabled = hasHttpLink;
+    if (hasHttpLink) {
+      fileInput.setAttribute("aria-describedby", "catalogCoverFileTip");
+    } else {
+      fileInput.removeAttribute("aria-describedby");
+    }
+  }
+  fileRowWrap?.classList.toggle("is-link-lock-tip", hasHttpLink);
+  if (fileTip) {
+    fileTip.setAttribute("aria-hidden", hasHttpLink ? "false" : "true");
+  }
+  fileBlock?.classList.toggle("is-cover-locked-link", hasHttpLink);
+  if (removeBtn) {
+    removeBtn.hidden = !hasFileCover;
+    removeBtn.disabled = !hasFileCover;
+  }
+  syncCatalogCoverFileStatus();
+}
+
+function onCatalogCoverUrlInput() {
+  const urlEl = document.querySelector("#catalogCoverUrl");
+  if (!urlEl) return;
+  const v = String(urlEl.value || "").trim();
+  if (!/^data:image\//i.test(String(state.coverDraftCatalog || ""))) {
+    state.coverDraftCatalog = v;
+  }
+  updateCatalogPreview();
+  updateCatalogFormChrome();
 }
 
 function personalCoverFlags() {
@@ -904,12 +1124,32 @@ function fillCatalogForm(book) {
   form.author.value = book.author;
   form.isbn.value = book.isbn;
   form.year.value = book.year;
-  form.genre.value = book.genre;
-  form.coverUrl.value = book.coverUrl || "";
-  form.textUrl.value = book.textUrl || "";
+  const g = book.genre || "";
+  const genreHidden = document.querySelector("#catalogGenre");
+  if (genreHidden) genreHidden.value = g;
+  const combo = document.querySelector('[data-combo-select="catalogGenre"]');
+  const comboInput = combo?.querySelector("[data-combo-input]");
+  if (comboInput) comboInput.value = g;
+  combo?.classList.remove("open");
+  const rawCover = String(book.coverUrl || "").trim();
+  const isDataUri = /^data:image\//i.test(rawCover);
+  const urlEl = document.querySelector("#catalogCoverUrl");
+  const cfile = document.querySelector("#catalogCoverFile");
+  if (cfile) cfile.value = "";
+  if (urlEl) {
+    if (isDataUri) {
+      urlEl.value = "";
+      state.coverDraftCatalog = rawCover;
+    } else {
+      urlEl.value = rawCover;
+      state.coverDraftCatalog = rawCover;
+    }
+  } else {
+    state.coverDraftCatalog = rawCover;
+  }
   form.contentText.value = book.contentText || "";
-  state.coverDraftCatalog = book.coverUrl || "";
   updateCatalogPreview();
+  updateCatalogFormChrome();
 }
 
 async function onPersonalListsClick(event, navigate, rerender) {
@@ -1005,7 +1245,6 @@ async function submitCatalogBook(e, rerender) {
   const payload = Object.fromEntries(new FormData(e.currentTarget));
   payload.year = Number(payload.year);
   payload.coverUrl = state.coverDraftCatalog || String(payload.coverUrl || "").trim();
-  payload.textUrl = String(payload.textUrl || "").trim();
   payload.contentText = String(payload.contentText || "");
   payload.inStock = 1;
   const errors = validateBook(payload);
@@ -1040,11 +1279,22 @@ async function onCoverFile(event, kind) {
       return;
     }
   }
+  if (kind === "catalog") {
+    const urlTrim = String(document.querySelector("#catalogCoverUrl")?.value || "").trim();
+    if (urlTrim) {
+      event.target.value = "";
+      notify("Сначала удалите или очистите ссылку на обложку", "warning");
+      return;
+    }
+  }
   try {
     const dataUrl = await resizeImageToDataUrl(file, 420, 560);
     if (kind === "catalog") {
+      const cUrl = document.querySelector("#catalogCoverUrl");
+      if (cUrl) cUrl.value = "";
       state.coverDraftCatalog = dataUrl;
       updateCatalogPreview();
+      updateCatalogFormChrome();
     } else {
       const form = document.querySelector("#personalBookForm");
       if (form?.coverUrl) form.coverUrl.value = "";
@@ -1149,12 +1399,15 @@ function setupComboSelect(id) {
       const match = !q || val.startsWith(q) || val.includes(q);
       btn.style.display = match ? "" : "none";
     });
+    const vis = visibleComboOptionButtons(menu);
     syncComboKbHighlight(menu);
+    if (vis.length === 0 && root.classList.contains("open")) close();
   };
 
   trigger?.addEventListener("click", () => {
     root.classList.toggle("open");
     filter();
+    if (!visibleComboOptionButtons(menu).length) close();
   });
 
   input.addEventListener("focus", () => {
@@ -1174,7 +1427,7 @@ function setupComboSelect(id) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       if (!root.classList.contains("open")) return;
       kbNavUsed = true;
-      const opts = visibleMenuOptions(menu, "[data-combo-option]");
+      const opts = visibleComboOptionButtons(menu);
       if (!opts.length) return;
       e.preventDefault();
       let activeIdx = opts.findIndex((o) => o.classList.contains("is-kb-active"));
@@ -1194,7 +1447,7 @@ function setupComboSelect(id) {
       e.preventDefault();
       const typed = String(input.value || "").trim();
       if (root.classList.contains("open")) {
-        const opts = visibleMenuOptions(menu, "[data-combo-option]");
+        const opts = visibleComboOptionButtons(menu);
         const active =
           opts.find((o) => o.classList.contains("is-kb-active")) || (kbNavUsed ? null : opts[0]);
         kbNavUsed = false;
@@ -1223,6 +1476,7 @@ function setupComboSelect(id) {
 }
 
 let adminSearchTimer = null;
+let lastAdminIdleHintAt = 0;
 
 async function fetchAdminUsers(navigate, rerender) {
   if (!state.token || state.role !== "ADMIN") return;
@@ -1276,11 +1530,24 @@ function syncAdminDetailForm() {
   if (!ph || !form) return;
   const id = state.adminUi.selectedId;
   const user = state.adminUi.items.find((u) => Number(u.id) === Number(id));
+  const idleZone = document.querySelector("#adminDetailIdleZone");
   if (!id || !user) {
     ph.hidden = false;
     form.hidden = true;
+    if (idleZone) idleZone.hidden = false;
+    try {
+      form.reset();
+    } catch (_) {
+      /* ignore */
+    }
+    const delBtn0 = document.querySelector("#adminDeleteUser");
+    if (delBtn0) {
+      delBtn0.disabled = true;
+      delBtn0.style.opacity = "0.45";
+    }
     return;
   }
+  if (idleZone) idleZone.hidden = true;
   ph.hidden = true;
   form.hidden = false;
   const uid = Number(state.userId);
@@ -1347,6 +1614,16 @@ function bindAdmin(navigate, rerender) {
   }
 
   document.querySelector("#profileMiniBtn")?.addEventListener("click", () => navigate("/auth"));
+
+  const adminIdleHint = () => {
+    if (state.adminUi.selectedId) return;
+    const now = Date.now();
+    if (now - lastAdminIdleHintAt < 2800) return;
+    lastAdminIdleHintAt = now;
+    notify("Выберите пользователя из списка слева", "info");
+  };
+  document.querySelector("#adminDetailPlaceholder")?.addEventListener("mouseenter", adminIdleHint);
+  document.querySelector("#adminDetailIdleZone")?.addEventListener("mouseenter", adminIdleHint);
 
   document.querySelector("#adminGenCodeBtn")?.addEventListener("click", async () => {
     try {

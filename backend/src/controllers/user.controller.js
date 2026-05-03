@@ -14,8 +14,11 @@ async function createLibrarianCode(req, res, next) {
     for (let attempt = 0; attempt < 8; attempt++) {
       const code = digits10();
       try {
-        const row = await prisma.librarianInviteCode.create({
-          data: { code, createdById: adminId }
+        const row = await prisma.$transaction(async (tx) => {
+          await tx.librarianInviteCode.deleteMany({ where: { used: false } });
+          return tx.librarianInviteCode.create({
+            data: { code, createdById: adminId }
+          });
         });
         return res.status(201).json({ code: row.code, id: row.id });
       } catch (e) {

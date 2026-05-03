@@ -273,6 +273,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   max-height: 252px; /* примерно 6 пунктов */
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(120, 190, 255, 0.8) rgba(6, 18, 52, 0.45);
   opacity: 0;
@@ -309,7 +310,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .custom-option.is-kb-active {
   background: rgba(88, 165, 255, .25);
 }
-.book-list { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 12px; max-height: 640px; overflow: auto; padding-right: 2px; }
+.book-list { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 12px; max-height: 640px; overflow: auto; overscroll-behavior: contain; padding-right: 2px; }
 .book-card {
   background: rgba(0, 0, 0, .22);
   border-radius: 14px;
@@ -322,13 +323,15 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 #personalFormHeading {
   scroll-margin-top: 16px;
 }
-.file-block-personal {
+.file-block-personal,
+.file-block-catalog {
   display: grid;
   gap: 8px;
   font-size: 13px;
   opacity: .92;
 }
-.file-block-personal.is-cover-locked-link label.file-fake-btn-row {
+.file-block-personal.is-cover-locked-link label.file-fake-btn-row,
+.file-block-catalog.is-cover-locked-link label.file-fake-btn-row {
   opacity: 0.55;
   filter: grayscale(0.15);
   cursor: not-allowed;
@@ -357,7 +360,8 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .file-remove-btn:hover {
   filter: brightness(1.12);
 }
-#personalBookForm input[name="coverUrl"]:read-only {
+#personalBookForm input[name="coverUrl"]:read-only,
+#catalogCoverUrl:read-only {
   opacity: 0.85;
   cursor: not-allowed;
 }
@@ -701,6 +705,7 @@ label.file-fake-btn:hover,
   white-space: pre-wrap;
   word-break: break-word;
   overflow: auto;
+  overscroll-behavior: contain;
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
@@ -708,6 +713,38 @@ label.file-fake-btn:hover,
   line-height: 1.45;
 }
 .personal-page { display: grid; gap: 14px; }
+.personal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.personal-tab {
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(130, 200, 255, 0.28);
+  background: rgba(12, 28, 58, 0.45);
+  color: #e8f4ff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.personal-tab:hover {
+  background: rgba(30, 60, 110, 0.55);
+  border-color: rgba(160, 220, 255, 0.45);
+}
+.personal-tab.is-active {
+  background: linear-gradient(135deg, rgba(60, 120, 255, 0.55), rgba(40, 180, 220, 0.4));
+  border-color: rgba(180, 230, 255, 0.55);
+  box-shadow: 0 6px 16px rgba(5, 20, 50, 0.25);
+}
+.personal-tab-panel[hidden] {
+  display: none !important;
+}
+.personal-tab-panel:not([hidden]) {
+  display: block;
+}
 .personal-header { margin-bottom: 0; }
 .profile-mini {
   display: inline-flex;
@@ -758,6 +795,120 @@ label.file-fake-btn:hover,
     grid-template-columns: 1fr;
   }
 }
+
+/* Управление: без прокрутки всей страницы — только список пользователей и при необходимости панель справа */
+#app:has(.admin-page--frame) {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+#app:has(.admin-page--frame) > .layout.wide {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#app:has(.admin-page--frame) .workspace-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#app:has(.admin-page--frame) .workspace-surface {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#app:has(.admin-page--frame) .workspace-surface > .topbar {
+  flex-shrink: 0;
+}
+#app:has(.admin-page--frame) .workspace-surface > section.personal-page.admin-page--frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#app:has(.admin-page--frame) .workspace-surface > footer.footer {
+  flex-shrink: 0;
+}
+#app:has(.admin-page--frame) .admin-page--frame .personal-header {
+  flex-shrink: 0;
+}
+#app:has(.admin-page--frame) .admin-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+@media (max-width: 900px) {
+  #app:has(.admin-page--frame) .admin-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(200px, 42vh) minmax(0, 1fr);
+  }
+}
+.admin-page--frame .admin-user-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.admin-page--frame .admin-user-column > h3,
+.admin-page--frame .admin-user-column .admin-user-hint,
+.admin-page--frame .admin-user-column .admin-toolbar,
+.admin-page--frame .admin-user-column #adminLibrarianCodeLine,
+.admin-page--frame .admin-user-column .admin-pagination {
+  flex-shrink: 0;
+}
+.admin-page--frame .admin-user-column .admin-user-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.admin-page--frame .admin-detail-card {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.admin-page--frame .admin-detail-card > h3,
+.admin-page--frame .admin-detail-placeholder {
+  flex-shrink: 0;
+}
+.admin-page--frame .admin-detail-idle-zone {
+  flex: 1 1 auto;
+  min-height: 120px;
+  border-radius: 14px;
+  border: 1px dashed rgba(200, 230, 255, 0.2);
+  background: rgba(0, 12, 36, 0.18);
+  cursor: help;
+}
+.admin-page--frame .admin-detail-idle-zone[hidden] {
+  display: none !important;
+}
+.admin-page--frame .admin-user-form {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.admin-user-form[hidden] {
+  display: none !important;
+}
+
 .admin-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -772,6 +923,7 @@ label.file-fake-btn:hover,
 .admin-user-list {
   max-height: min(52vh, 520px);
   overflow: auto;
+  overscroll-behavior: contain;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(0, 0, 0, 0.18);
@@ -779,6 +931,9 @@ label.file-fake-btn:hover,
   display: grid;
   gap: 6px;
   outline: none;
+  align-content: start;
+  align-items: start;
+  justify-items: stretch;
 }
 .admin-user-list:focus-visible {
   box-shadow: 0 0 0 2px rgba(90, 170, 255, 0.55);
@@ -910,6 +1065,10 @@ label.file-fake-btn:hover,
   display: grid;
   gap: 6px;
 }
+/* Иначе .register-librarian-wrap { display: grid } перебивает UA [hidden] и поле видно при «Читатель». */
+.register-librarian-wrap[hidden] {
+  display: none !important;
+}
 textarea {
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 10px;
@@ -920,6 +1079,14 @@ textarea {
   min-height: 100px;
   resize: vertical;
   font-family: inherit;
+  overscroll-behavior: contain;
+}
+/* Ввод текста книги: без автопереноса по ширине окна — только явные переводы строки; длинные строки уходят в горизонтальный скролл. */
+textarea.book-content-textarea {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-wrap: normal;
+  overflow-x: auto;
 }
 
 .footer {
@@ -998,6 +1165,7 @@ textarea {
   gap: 4px;
   max-height: 252px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);

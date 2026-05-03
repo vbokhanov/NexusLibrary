@@ -1,11 +1,11 @@
 // @ts-nocheck
 export function validateBook(payload) {
   const errors = [];
-  if (!payload.title || payload.title.trim().length < 2) errors.push("Название: минимум 2 символа");
+  if (!payload.title || payload.title.trim().length < 1) errors.push("Название: минимум 1 символ");
   if (!payload.author || payload.author.trim().length < 2) errors.push("Автор: минимум 2 символа");
   if (!/^[0-9X-]{10,17}$/.test(payload.isbn || "")) errors.push("ISBN: формат 10-17 символов");
-  if (!Number.isInteger(payload.year) || payload.year < 1800 || payload.year > new Date().getFullYear()) {
-    errors.push("Год: некорректное значение");
+  if (!Number.isInteger(payload.year) || payload.year < 500 || payload.year > new Date().getFullYear()) {
+    errors.push("Год: от 500 до текущего года");
   }
   if (!payload.genre || payload.genre.trim().length < 2) errors.push("Жанр: минимум 2 символа");
   if (
@@ -15,8 +15,8 @@ export function validateBook(payload) {
   ) {
     errors.push("Обложка: нужна ссылка https://... или загруженный файл");
   }
-  if (payload.textUrl && String(payload.textUrl).trim() && !/^https?:\/\//.test(payload.textUrl)) {
-    errors.push("Текст: укажите ссылку https://... на .txt или оставьте пустым");
+  if (payload.contentText && String(payload.contentText).length > 3_000_000) {
+    errors.push("Текст слишком длинный: не более 3 млн символов");
   }
   return errors;
 }
@@ -39,7 +39,9 @@ export function validatePersonalBook(payload) {
   if (payload.textUrl && String(payload.textUrl).trim() && !/^https?:\/\//.test(payload.textUrl)) {
     errors.push("Ссылка на текст: только https://... или пусто");
   }
-  if (payload.contentText && String(payload.contentText).length > 250000) errors.push("Текст слишком длинный");
+  if (payload.contentText && String(payload.contentText).length > 3_000_000) {
+    errors.push("Текст слишком длинный: не более 3 млн символов");
+  }
   return errors;
 }
 

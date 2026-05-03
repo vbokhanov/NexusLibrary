@@ -10,7 +10,8 @@ const {
   createPersonalBook,
   updateBook,
   deleteBook,
-  getBookText
+  getBookText,
+  getBookCover
 } = require("../controllers/book.controller");
 const { requireAuth, requireRole } = require("../middleware/auth.middleware");
 
@@ -21,6 +22,7 @@ bookRouter.get("/meta/count", getCatalogCount);
 bookRouter.get("/", listBooks);
 bookRouter.get("/favorites/batch", requireAuth, listFavoritesBatch);
 bookRouter.get("/mine", requireAuth, listMyBooks);
+bookRouter.get("/:id/cover", getBookCover);
 bookRouter.get("/:id/text", getBookText);
 bookRouter.get("/:id", getBookById);
 bookRouter.post("/", requireAuth, requireRole(["ADMIN", "LIBRARIAN"]), createCatalogBook);

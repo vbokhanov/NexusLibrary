@@ -2,7 +2,10 @@ const prisma = require("../config/prisma");
 const { catalogBookSchema, personalBookSchema } = require("../validators/book.validator");
 
 const MAX_TEXT_FETCH_BYTES = 4 * 1024 * 1024;
-const REMOTE_TEXT_TIMEOUT_MS = 4500;
+/** Внешние зеркала (Gutenberg и т.д.) в приватных окнах / медленных сетях часто не укладываются в 4–5 с. */
+const REMOTE_TEXT_TIMEOUT_MS = 28000;
+const MAX_COVER_FETCH_BYTES = 3 * 1024 * 1024;
+const REMOTE_COVER_TIMEOUT_MS = 20000;
 
 function catalogWhereFromQuery(req) {
   const q = String(req.query.q || "").trim();
@@ -121,15 +124,44 @@ async function getBookById(req, res, next) {
   }
 }
 
+/** Дубликат названия среди книг каталога (ownerUserId IS NULL), без учёта регистра. */
+async function findCatalogBookWithSameTitle(title, excludeId) {
+  const t = String(title || "").trim();
+  if (!t) return null;
+  const idOk = Number.isInteger(excludeId) && excludeId > 0;
+  return prisma.book.findFirst({
+    where: {
+      ownerUserId: null,
+      ...(idOk ? { id: { not: excludeId } } : {}),
+      title: { equals: t, mode: "insensitive" }
+    },
+    select: { id: true }
+  });
+}
+
 async function createCatalogBook(req, res, next) {
   try {
     const input = catalogBookSchema.parse(req.body);
-    const data = { ...input, ownerUserId: null };
+    const dup = await findCatalogBookWithSameTitle(input.title, null);
+    if (dup) {
+      return res.status(409).json({
+        message: "В общем каталоге уже есть книга с таким названием (без учёта регистра)."
+      });
+    }
+    const data = { ...input, ownerUserId: null, textUrl: null };
     if (data.coverUrl === "") delete data.coverUrl;
-    if (data.textUrl === "") delete data.textUrl;
     if (data.contentText === "") delete data.contentText;
-    const book = await prisma.book.create({ data });
-    return res.status(201).json(book);
+    try {
+      const book = await prisma.book.create({ data });
+      return res.status(201).json(book);
+    } catch (err) {
+      if (err?.code === "P2002") {
+        return res.status(409).json({
+          message: "В общем каталоге уже есть книга с таким названием (без учёта регистра)."
+        });
+      }
+      throw err;
+    }
   } catch (error) {
     return next(error);
   }
@@ -186,12 +218,32 @@ async function updateBook(req, res, next) {
     if (data.textUrl === "") data.textUrl = null;
     if (data.contentText === "") data.contentText = null;
 
-    const book = await prisma.book.update({
-      where: { id },
-      data
-    });
+    if (isCatalog) {
+      data.textUrl = null;
+      if (data.title !== undefined) {
+        const dup = await findCatalogBookWithSameTitle(data.title, id);
+        if (dup) {
+          return res.status(409).json({
+            message: "В общем каталоге уже есть книга с таким названием (без учёта регистра)."
+          });
+        }
+      }
+    }
 
-    return res.json(book);
+    try {
+      const book = await prisma.book.update({
+        where: { id },
+        data
+      });
+      return res.json(book);
+    } catch (err) {
+      if (isCatalog && err?.code === "P2002") {
+        return res.status(409).json({
+          message: "В общем каталоге уже есть книга с таким названием (без учёта регистра)."
+        });
+      }
+      throw err;
+    }
   } catch (error) {
     return next(error);
   }
@@ -215,6 +267,50 @@ async function deleteBook(req, res, next) {
 
     await prisma.book.delete({ where: { id } });
     return res.status(204).send();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getBookCover(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).end();
+
+    const book = await prisma.book.findUnique({
+      where: { id },
+      select: { coverUrl: true }
+    });
+    if (!book) return res.status(404).end();
+
+    const url = String(book.coverUrl || "").trim();
+    if (!url || url.startsWith("data:")) return res.status(404).end();
+    if (!/^https?:\/\//i.test(url)) return res.status(404).end();
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "LibraryNexusCover/1.0 (edu project)",
+          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(REMOTE_COVER_TIMEOUT_MS)
+      });
+      if (!response.ok) return res.status(502).end();
+
+      const buf = Buffer.from(await response.arrayBuffer());
+      if (buf.length > MAX_COVER_FETCH_BYTES) return res.status(413).end();
+
+      let ct = (response.headers.get("content-type") || "image/jpeg").split(";")[0].trim().toLowerCase();
+      if (!ct.startsWith("image/")) ct = "image/jpeg";
+
+      res.setHeader("Content-Type", ct);
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      return res.send(buf);
+    } catch (_) {
+      return res.status(504).end();
+    }
   } catch (error) {
     return next(error);
   }
@@ -282,5 +378,6 @@ module.exports = {
   createPersonalBook,
   updateBook,
   deleteBook,
-  getBookText
+  getBookText,
+  getBookCover
 };

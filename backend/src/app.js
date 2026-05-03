@@ -16,7 +16,7 @@ app.use(
     origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "16mb" }));
 app.use(morgan("dev"));
 
 app.get("/api/health", (req, res) => {

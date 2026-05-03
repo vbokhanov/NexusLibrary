@@ -71,11 +71,22 @@ export function bookTextUrl(bookId: number, download: boolean) {
   return `${API_BASE}/books/${bookId}/text${download ? "?download=1" : ""}`;
 }
 
+/** Обложка через API: браузер не ходит на сторонний домен (лучше для инкогнито / блокировок). */
+export function bookCoverUrl(bookId: number) {
+  return `${API_BASE}/books/${bookId}/cover`;
+}
+
 export async function fetchBookPlainText(bookId: number) {
-  const response = await fetch(bookTextUrl(bookId, false));
-  if (!response.ok) {
+  const url = bookTextUrl(bookId, false);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(url);
+    if (response.ok) return response.text();
     const text = await response.text();
+    if (response.status === 504 && attempt === 0) {
+      await sleep(900);
+      continue;
+    }
     throw new Error(text || "Не удалось загрузить текст");
   }
-  return response.text();
+  throw new Error("Не удалось загрузить текст");
 }
