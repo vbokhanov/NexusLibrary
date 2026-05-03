@@ -1,10 +1,17 @@
 // @ts-nocheck
 import { apiRequest, fetchBookPlainText } from "../api/http";
 import { canManageCatalog, loadFavoritesForSession, saveFavoritesForSession, state } from "../core/state";
-import { validateBook, validateLogin, validatePersonalBook, validateRegister } from "../core/validators";
+import {
+  validateBook,
+  validateChangePassword,
+  validateLogin,
+  validatePersonalBook,
+  validateRegister
+} from "../core/validators";
 import {
   notify,
   renderCatalogGrid,
+  renderAdminUserListDom,
   renderPersonalFavoritesListOnly,
   renderPersonalLists,
   renderPersonalMyBooksListOnly,
@@ -108,6 +115,14 @@ export function requestConfirm(message, confirmLabel = "Удалить") {
   });
 }
 
+/** У клика target иногда Text — у Node нет closest(), иначе весь обработчик падает. */
+function eventClickTargetElement(ev) {
+  const t = ev?.target;
+  if (t instanceof Element) return t;
+  if (t && typeof t === "object" && t.parentElement instanceof Element) return t.parentElement;
+  return null;
+}
+
 export function bindEvents({ page, navigate, rerender }) {
   bindNavigation(navigate);
   bindLogout(rerender);
@@ -119,6 +134,7 @@ export function bindEvents({ page, navigate, rerender }) {
   if (page === "/auth") bindAuth(navigate, rerender);
   if (page === "/library") bindLibrary(rerender);
   if (page === "/personal") bindPersonal(navigate, rerender);
+  if (page === "/admin") bindAdmin(navigate, rerender);
 }
 
 function clearSession() {
@@ -258,7 +274,8 @@ function bindDropdownKeyboard() {
     if (e.key === "Enter" || e.key === " ") {
       const active =
         opts.find((o) => o.classList.contains("is-kb-active")) ||
-        opts.find((o) => o.classList.contains("is-selected"));
+        opts.find((o) => o.classList.contains("is-selected")) ||
+        opts[0];
       if (!active) return;
       e.preventDefault();
       const id = customRoot.getAttribute("data-custom-select");
@@ -337,11 +354,44 @@ function bindHome(navigate) {
   document.querySelector("#startNow")?.addEventListener("click", () => navigate("/auth"));
 }
 
+function syncRegisterLibrarianWrap() {
+  const wrap = document.querySelector("#registerLibrarianWrap");
+  const roleInput = document.querySelector("#registerRole");
+  if (!wrap || !roleInput) return;
+  const show = String(roleInput.value || "READER").toUpperCase() === "LIBRARIAN";
+  wrap.hidden = !show;
+}
+
 function bindAuth(navigate, rerender) {
   if (state.token) {
     loadProfileStats(rerender);
     document.querySelector("#goLibraryBtn")?.addEventListener("click", () => navigate("/library"));
     document.querySelector("#goPersonalBtn")?.addEventListener("click", () => navigate("/personal"));
+    document.querySelector("#goAdminBtn")?.addEventListener("click", () => navigate("/admin"));
+    document.querySelector("#changePasswordForm")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData(e.currentTarget));
+      const err = validateChangePassword(payload);
+      if (err) return notify(err, "warning");
+      try {
+        await apiRequest(
+          "/auth/change-password",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              currentPassword: payload.currentPassword,
+              newPassword: payload.newPassword
+            })
+          },
+          state.token
+        );
+        notify("Пароль обновлён", "success");
+        e.currentTarget.reset();
+      } catch (error) {
+        if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+        notify(parseApiError(error, "Не удалось сменить пароль"), "error");
+      }
+    });
     return;
   }
   document.querySelector("#tabLogin")?.addEventListener("click", () => {
@@ -357,7 +407,9 @@ function bindAuth(navigate, rerender) {
     if (roleInput) roleInput.value = value;
     const labelNode = document.querySelector('[data-custom-select="registerRole"] [data-select-trigger] span');
     if (labelNode) labelNode.textContent = option?.textContent || "Читатель";
+    syncRegisterLibrarianWrap();
   });
+  queueMicrotask(() => syncRegisterLibrarianWrap());
 
   document.querySelector("#loginForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -379,6 +431,7 @@ function bindAuth(navigate, rerender) {
     e.preventDefault();
     const payload = Object.fromEntries(new FormData(e.currentTarget));
     payload.role = String(payload.role || "READER").toUpperCase();
+    if (payload.role !== "LIBRARIAN") delete payload.librarianCode;
     const err = validateRegister(payload);
     if (err) return notify(err, "warning");
     try {
@@ -599,16 +652,27 @@ function bindPersonal(navigate, rerender) {
 
   document.querySelector("#personalBookForm")?.addEventListener("submit", (e) => submitPersonalBook(e, rerender));
   document.querySelector("#catalogBookForm")?.addEventListener("submit", (e) => submitCatalogBook(e, rerender));
+  document
+    .querySelector("#personalBookForm")
+    ?.querySelector('[name="coverUrl"]')
+    ?.addEventListener("input", () => onPersonalCoverUrlInput());
   document.querySelector("#personalCoverFile")?.addEventListener("change", (event) =>
     onCoverFile(event, "personal")
   );
+  document.querySelector("#personalCoverFileRemove")?.addEventListener("click", () => {
+    state.coverDraft = "";
+    const fin = document.querySelector("#personalCoverFile");
+    if (fin) fin.value = "";
+    updatePersonalPreview();
+    updatePersonalFormChrome();
+  });
   document.querySelector("#catalogCoverFile")?.addEventListener("change", (event) =>
     onCoverFile(event, "catalog")
   );
   document.querySelector("#cancelPersonalEdit")?.addEventListener("click", () => {
     state.editingId = null;
     state.coverDraft = "";
-    rerender();
+    resetPersonalBookFormAfterSave();
   });
   document.querySelector("#cancelCatalogEdit")?.addEventListener("click", () => {
     state.editingCatalogId = null;
@@ -624,6 +688,7 @@ function bindPersonal(navigate, rerender) {
     try {
       const favoritesNeedFetch = state.favorites.length > 0 && state.favoriteBooks.length === 0;
       await loadPersonalData({ mine: true, favorites: favoritesNeedFetch });
+      updatePersonalFormChrome();
     } catch (error) {
       if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось загрузить данные"), "error");
@@ -686,15 +751,109 @@ async function loadPersonalData(options = { mine: true, favorites: true }) {
   renderPersonalMyBooksListOnly();
 }
 
+function personalCoverFlags() {
+  const form = document.querySelector("#personalBookForm");
+  const coverUrlInput = form?.querySelector('[name="coverUrl"]');
+  const fileInput = document.querySelector("#personalCoverFile");
+  const urlTrim = String(coverUrlInput?.value || "").trim();
+  const draft = String(state.coverDraft || "").trim();
+  const hasHttpLink = urlTrim.length > 0;
+  const hasFileCover = /^data:image\//i.test(draft) || Boolean(fileInput?.files?.length);
+  return { form, coverUrlInput, fileInput, urlTrim, draft, hasHttpLink, hasFileCover };
+}
+
+function syncPersonalCoverFileStatus() {
+  const el = document.querySelector("#personalCoverFileStatus");
+  if (!el) return;
+  const { fileInput, hasHttpLink, hasFileCover, draft } = personalCoverFlags();
+  if (hasHttpLink) {
+    el.textContent = "Указана ссылка на обложку — загрузка файла отключена.";
+    return;
+  }
+  if (hasFileCover) {
+    if (/^data:image\//i.test(draft)) {
+      el.textContent = "Обложка из файла — можно заменить или удалить файл.";
+    } else if (fileInput?.files?.length) {
+      el.textContent = `Выбран файл: ${fileInput.files[0].name}`;
+    } else {
+      el.textContent = "Обложка из файла — можно заменить или удалить файл.";
+    }
+    return;
+  }
+  if (draft && !/^data:image\//i.test(draft)) {
+    el.textContent = "Используется ссылка на обложку — файл не обязателен.";
+    return;
+  }
+  el.textContent = "Файл не обязателен, если указана ссылка на обложку.";
+}
+
+function updatePersonalFormChrome() {
+  const heading = document.querySelector("#personalFormHeading");
+  const form = document.querySelector("#personalBookForm");
+  if (heading) heading.textContent = state.editingId ? "Редактировать мою книгу" : "Добавить книгу в личную библиотеку";
+  if (form) {
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.textContent = state.editingId ? "Сохранить" : "Добавить";
+  }
+  const fileBtn = document.querySelector("[data-personal-file-btn-text]");
+  if (fileBtn) {
+    const draft = String(state.coverDraft || "").trim();
+    fileBtn.textContent = /^data:image\//i.test(draft) ? "Изменить файл" : "Выбрать файл";
+  }
+  const { coverUrlInput, fileInput, hasHttpLink, hasFileCover } = personalCoverFlags();
+  const fileBlock = document.querySelector(".file-block-personal");
+  const removeBtn = document.querySelector("#personalCoverFileRemove");
+  const coverUrlWrap = document.querySelector("#personalCoverUrlWrap");
+  const coverUrlTip = document.querySelector("#personalCoverUrlTip");
+  if (coverUrlInput) {
+    coverUrlInput.readOnly = hasFileCover;
+    coverUrlInput.removeAttribute("title");
+    if (hasFileCover) {
+      coverUrlInput.setAttribute("aria-describedby", "personalCoverUrlTip");
+    } else {
+      coverUrlInput.removeAttribute("aria-describedby");
+    }
+  }
+  coverUrlWrap?.classList.toggle("is-file-lock-tip", hasFileCover);
+  if (coverUrlTip) {
+    coverUrlTip.setAttribute("aria-hidden", hasFileCover ? "false" : "true");
+  }
+  const fileRowWrap = document.querySelector("#personalCoverFileRowWrap");
+  const fileTip = document.querySelector("#personalCoverFileTip");
+  if (fileInput) {
+    fileInput.disabled = hasHttpLink;
+    if (hasHttpLink) {
+      fileInput.setAttribute("aria-describedby", "personalCoverFileTip");
+    } else {
+      fileInput.removeAttribute("aria-describedby");
+    }
+  }
+  fileRowWrap?.classList.toggle("is-link-lock-tip", hasHttpLink);
+  if (fileTip) {
+    fileTip.setAttribute("aria-hidden", hasHttpLink ? "false" : "true");
+  }
+  fileBlock?.classList.toggle("is-cover-locked-link", hasHttpLink);
+  if (removeBtn) {
+    removeBtn.hidden = !hasFileCover;
+    removeBtn.disabled = !hasFileCover;
+  }
+  syncPersonalCoverFileStatus();
+}
+
+function onPersonalCoverUrlInput() {
+  const form = document.querySelector("#personalBookForm");
+  if (!form) return;
+  const v = String(form.coverUrl.value || "").trim();
+  if (!/^data:image\//i.test(String(state.coverDraft || ""))) {
+    state.coverDraft = v;
+  }
+  updatePersonalPreview();
+  updatePersonalFormChrome();
+}
+
 function resetPersonalBookFormAfterSave() {
   const form = document.querySelector("#personalBookForm");
-  if (form) {
-    form.reset();
-    const submitBtn = form.querySelector('button[type="submit"]');
-    if (submitBtn) submitBtn.textContent = "Добавить";
-  }
-  const heading = document.querySelector("#personalFormHeading");
-  if (heading) heading.textContent = "Добавить свою книгу";
+  if (form) form.reset();
   const genreHidden = document.querySelector("#personalGenre");
   if (genreHidden) genreHidden.value = "";
   const comboRoot = document.querySelector('[data-combo-select="personalGenre"]');
@@ -705,9 +864,10 @@ function resetPersonalBookFormAfterSave() {
   if (coverFile) coverFile.value = "";
   state.coverDraft = "";
   updatePersonalPreview();
+  updatePersonalFormChrome();
 }
 
-function fillPersonalForm(book) {
+function fillPersonalForm(book, options = {}) {
   const form = document.querySelector("#personalBookForm");
   if (!form) return;
   form.title.value = book.title;
@@ -718,10 +878,23 @@ function fillPersonalForm(book) {
   const combo = document.querySelector('[data-combo-select="personalGenre"]');
   const comboInput = combo?.querySelector("[data-combo-input]");
   if (comboInput) comboInput.value = book.genre || "";
-  form.coverUrl.value = book.coverUrl || "";
+  const rawCover = String(book.coverUrl || "").trim();
+  const isDataUri = /^data:image\//i.test(rawCover);
+  if (isDataUri) {
+    form.coverUrl.value = "";
+    state.coverDraft = rawCover;
+  } else {
+    form.coverUrl.value = rawCover;
+    state.coverDraft = rawCover;
+  }
   form.contentText.value = book.contentText || "";
-  state.coverDraft = book.coverUrl || "";
   updatePersonalPreview();
+  updatePersonalFormChrome();
+  if (options.scrollToForm) {
+    requestAnimationFrame(() => {
+      document.getElementById("personalFormHeading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 }
 
 function fillCatalogForm(book) {
@@ -752,9 +925,21 @@ async function onPersonalListsClick(event, navigate, rerender) {
     return;
   }
   if (action === "edit-mine") {
-    state.editingId = id;
-    state.editingCatalogId = null;
-    rerender();
+    void (async () => {
+      state.editingId = id;
+      state.editingCatalogId = null;
+      let book = state.myBooks.find((b) => b.id === id);
+      if (!book) {
+        await loadPersonalData({ mine: true, favorites: false });
+        book = state.myBooks.find((b) => b.id === id);
+      }
+      if (!book) {
+        state.editingId = null;
+        notify("Книга не найдена", "warning");
+        return;
+      }
+      fillPersonalForm(book, { scrollToForm: true });
+    })();
     return;
   }
   if (action === "delete-mine") {
@@ -791,7 +976,7 @@ async function submitPersonalBook(e, rerender) {
   if (!state.token) return notify("Нужна авторизация", "warning");
   const payload = Object.fromEntries(new FormData(e.currentTarget));
   payload.year = Number(payload.year);
-  payload.coverUrl = state.coverDraft || String(payload.coverUrl || "").trim();
+  payload.coverUrl = String(payload.coverUrl || "").trim() || state.coverDraft || "";
   // textUrl removed from personal library UI
   payload.contentText = String(payload.contentText || "");
   const errors = validatePersonalBook(payload);
@@ -828,10 +1013,10 @@ async function submitCatalogBook(e, rerender) {
   try {
     if (state.editingCatalogId) {
       await apiRequest(`/books/${state.editingCatalogId}`, { method: "PATCH", body: JSON.stringify(payload) }, state.token);
-      notify("Книга фонда обновлена", "success");
+      notify("Публикация обновлена", "success");
     } else {
       await apiRequest("/books", { method: "POST", body: JSON.stringify(payload) }, state.token);
-      notify("Добавлено в фонд", "success");
+      notify("Книга опубликована в общем каталоге", "success");
     }
     await fetchCatalogTotal();
     state.editingCatalogId = null;
@@ -846,14 +1031,26 @@ async function submitCatalogBook(e, rerender) {
 async function onCoverFile(event, kind) {
   const file = event.target.files?.[0];
   if (!file) return;
+  if (kind === "personal") {
+    const form = document.querySelector("#personalBookForm");
+    const urlTrim = String(form?.coverUrl?.value || "").trim();
+    if (urlTrim) {
+      event.target.value = "";
+      notify("Сначала удалите или очистите ссылку на обложку", "warning");
+      return;
+    }
+  }
   try {
     const dataUrl = await resizeImageToDataUrl(file, 420, 560);
     if (kind === "catalog") {
       state.coverDraftCatalog = dataUrl;
       updateCatalogPreview();
     } else {
+      const form = document.querySelector("#personalBookForm");
+      if (form?.coverUrl) form.coverUrl.value = "";
       state.coverDraft = dataUrl;
       updatePersonalPreview();
+      updatePersonalFormChrome();
     }
     notify("Обложка загружена", "success");
   } catch (error) {
@@ -925,6 +1122,8 @@ function setupCustomSelect(id, onChange) {
 function setupComboSelect(id) {
   const root = document.querySelector(`[data-combo-select="${id}"]`);
   if (!root) return;
+  if (root.dataset.comboWired === "1") return;
+  root.dataset.comboWired = "1";
   const input = root.querySelector("[data-combo-input]");
   const menu = root.querySelector("[data-combo-menu]");
   const trigger = root.querySelector("[data-combo-trigger]");
@@ -994,9 +1193,10 @@ function setupComboSelect(id) {
     if (e.key === "Enter") {
       e.preventDefault();
       const typed = String(input.value || "").trim();
-      if (kbNavUsed && root.classList.contains("open")) {
+      if (root.classList.contains("open")) {
         const opts = visibleMenuOptions(menu, "[data-combo-option]");
-        const active = opts.find((o) => o.classList.contains("is-kb-active"));
+        const active =
+          opts.find((o) => o.classList.contains("is-kb-active")) || (kbNavUsed ? null : opts[0]);
         kbNavUsed = false;
         if (active) applyValue(String(active.dataset.value || "").trim());
         else applyValue(typed);
@@ -1022,9 +1222,270 @@ function setupComboSelect(id) {
   );
 }
 
+let adminSearchTimer = null;
+
+async function fetchAdminUsers(navigate, rerender) {
+  if (!state.token || state.role !== "ADMIN") return;
+  state.adminUi.loading = true;
+  renderAdminUserListDom();
+  const q = encodeURIComponent(state.adminUi.q || "");
+  const { page, limit } = state.adminUi;
+  try {
+    const data = await apiRequest(`/users?page=${page}&limit=${limit}&q=${q}`, { method: "GET" }, state.token);
+    state.adminUi.items = Array.isArray(data.items) ? data.items : [];
+    state.adminUi.total = Number(data.total) || 0;
+    state.adminUi.pages = Number(data.pages) || 1;
+    state.adminUi.kbIndex = Math.min(state.adminUi.kbIndex, Math.max(0, state.adminUi.items.length - 1));
+    const sid = state.adminUi.selectedId;
+    if (sid != null && sid !== "" && !state.adminUi.items.some((u) => Number(u.id) === Number(sid))) {
+      state.adminUi.selectedId = null;
+    }
+  } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+    notify(parseApiError(error, "Не удалось загрузить пользователей"), "error");
+  } finally {
+    state.adminUi.loading = false;
+    renderAdminUserListDom();
+    syncAdminDetailForm();
+  }
+}
+
+async function patchSelectedUserBanned(banned, navigate, rerender) {
+  const id = Number(state.adminUi.selectedId);
+  const selfId = Number(state.userId);
+  if (!Number.isInteger(id) || id < 1 || id === 1) return;
+  if (Number.isInteger(selfId) && selfId > 0 && id === selfId) return;
+  const msg = banned
+    ? "Заблокировать этого пользователя? Войти в аккаунт он больше не сможет, пока вы не разблокируете его."
+    : "Разблокировать этого пользователя? Он снова сможет войти в систему.";
+  const okLabel = banned ? "Заблокировать" : "Разблокировать";
+  if (!(await requestConfirm(msg, okLabel))) return;
+  try {
+    await apiRequest(`/users/${id}`, { method: "PATCH", body: JSON.stringify({ banned }) }, state.token);
+    notify(banned ? "Пользователь заблокирован" : "Блокировка снята", "success");
+    await fetchAdminUsers(navigate, rerender);
+  } catch (error) {
+    if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+    notify(parseApiError(error, "Не удалось обновить статус"), "error");
+  }
+}
+
+function syncAdminDetailForm() {
+  const ph = document.querySelector("#adminDetailPlaceholder");
+  const form = document.querySelector("#adminUserForm");
+  if (!ph || !form) return;
+  const id = state.adminUi.selectedId;
+  const user = state.adminUi.items.find((u) => Number(u.id) === Number(id));
+  if (!id || !user) {
+    ph.hidden = false;
+    form.hidden = true;
+    return;
+  }
+  ph.hidden = true;
+  form.hidden = false;
+  const uid = Number(state.userId);
+  const isSelf = Number(id) === uid;
+  const isBootstrapAdmin = Number(id) === 1;
+
+  form.querySelector("#adminFormUserId").value = String(id);
+  form.querySelector("#adminFormFullName").value = user.fullName || "";
+  form.querySelector("#adminFormEmail").value = user.email || "";
+  form.querySelector("#adminFormRole").value = user.role || "READER";
+  form.querySelector("#adminFormNewPass").value = "";
+
+  const stateText = form.querySelector("#adminBanStateText");
+  const blockBtn = form.querySelector("#adminBlockUser");
+  const unblockBtn = form.querySelector("#adminUnblockUser");
+  const roleSel = form.querySelector("#adminFormRole");
+  const delBtn = document.querySelector("#adminDeleteUser");
+
+  if (stateText) {
+    stateText.textContent = user.banned ? "заблокирован" : "активен";
+  }
+
+  const canModerateBan = !isBootstrapAdmin && !isSelf;
+  if (blockBtn && unblockBtn) {
+    if (!canModerateBan) {
+      blockBtn.hidden = true;
+      unblockBtn.hidden = true;
+      blockBtn.disabled = true;
+      unblockBtn.disabled = true;
+    } else if (user.banned) {
+      blockBtn.hidden = true;
+      unblockBtn.hidden = false;
+      blockBtn.disabled = true;
+      unblockBtn.disabled = false;
+    } else {
+      blockBtn.hidden = false;
+      unblockBtn.hidden = true;
+      blockBtn.disabled = false;
+      unblockBtn.disabled = true;
+    }
+  }
+
+  roleSel.disabled = isBootstrapAdmin;
+  delBtn.disabled = isBootstrapAdmin || isSelf;
+  delBtn.style.opacity = delBtn.disabled ? "0.45" : "";
+}
+
+function applyAdminKeyboardSelect() {
+  const items = state.adminUi.items || [];
+  if (!items.length) return;
+  const u = items[state.adminUi.kbIndex];
+  if (!u) return;
+  const n = Number(u.id);
+  state.adminUi.selectedId = Number.isInteger(n) && n > 0 ? n : u.id;
+  renderAdminUserListDom();
+  syncAdminDetailForm();
+}
+
+function bindAdmin(navigate, rerender) {
+  if (!state.token || state.role !== "ADMIN") {
+    notify("Недостаточно прав", "warning");
+    navigate("/personal");
+    return;
+  }
+
+  document.querySelector("#profileMiniBtn")?.addEventListener("click", () => navigate("/auth"));
+
+  document.querySelector("#adminGenCodeBtn")?.addEventListener("click", async () => {
+    try {
+      const data = await apiRequest("/users/librarian-codes", { method: "POST", body: "{}" }, state.token);
+      state.adminUi.lastLibrarianCode = data?.code || "";
+      notify("Код создан — передайте его кандидату", "success");
+      renderAdminUserListDom();
+    } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+      notify(parseApiError(error, "Не удалось создать код"), "error");
+    }
+  });
+
+  document.querySelector("#adminUserSearch")?.addEventListener("input", (e) => {
+    state.adminUi.q = String(e.target.value || "");
+    state.adminUi.page = 1;
+    clearTimeout(adminSearchTimer);
+    adminSearchTimer = setTimeout(() => fetchAdminUsers(navigate, rerender), 380);
+  });
+
+  document.querySelector("#adminPrevPage")?.addEventListener("click", () => {
+    if (state.adminUi.page > 1) {
+      state.adminUi.page -= 1;
+      void fetchAdminUsers(navigate, rerender);
+    }
+  });
+  document.querySelector("#adminNextPage")?.addEventListener("click", () => {
+    if (state.adminUi.page < state.adminUi.pages) {
+      state.adminUi.page += 1;
+      void fetchAdminUsers(navigate, rerender);
+    }
+  });
+
+  const listEl = document.querySelector("#adminUserList");
+  listEl?.addEventListener("click", (e) => {
+    const row = eventClickTargetElement(e)?.closest("[data-admin-user]");
+    if (!row) return;
+    const rawId = row.dataset.adminUser;
+    const numId = Number(rawId);
+    state.adminUi.selectedId = Number.isInteger(numId) && numId > 0 ? numId : rawId;
+    state.adminUi.kbIndex = state.adminUi.items.findIndex((u) => Number(u.id) === Number(state.adminUi.selectedId));
+    renderAdminUserListDom();
+    syncAdminDetailForm();
+  });
+
+  listEl?.addEventListener("keydown", (e) => {
+    const items = state.adminUi.items || [];
+    if (!items.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      state.adminUi.kbIndex = Math.min(items.length - 1, state.adminUi.kbIndex + 1);
+      renderAdminUserListDom();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      state.adminUi.kbIndex = Math.max(0, state.adminUi.kbIndex - 1);
+      renderAdminUserListDom();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      applyAdminKeyboardSelect();
+    }
+  });
+
+  document.querySelector("#adminUserForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = Number(state.adminUi.selectedId);
+    if (!id) return;
+    const fd = new FormData(e.currentTarget);
+    const isSelf = Number(id) === Number(state.userId);
+    const body = {
+      fullName: String(fd.get("fullName") || "").trim(),
+      email: String(fd.get("email") || "").trim().toLowerCase()
+    };
+    if (!isSelf) {
+      body.role = String(fd.get("role") || "READER").toUpperCase();
+    }
+    const newPass = String(fd.get("newAdminPassword") || "").trim();
+    try {
+      await apiRequest(`/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, state.token);
+      if (newPass.length >= 8 && !isSelf) {
+        await apiRequest(`/users/${id}/password`, { method: "PATCH", body: JSON.stringify({ newPassword: newPass }) }, state.token);
+      }
+      notify("Сохранено", "success");
+      await fetchAdminUsers(navigate, rerender);
+    } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+      notify(parseApiError(error, "Не удалось сохранить"), "error");
+    }
+  });
+
+  document.querySelector("#adminDetailCard")?.addEventListener(
+    "click",
+    (e) => {
+      const t = eventClickTargetElement(e);
+      if (!t) return;
+      if (t.closest("#adminBlockUser")) {
+        e.preventDefault();
+        e.stopPropagation();
+        void patchSelectedUserBanned(true, navigate, rerender);
+        return;
+      }
+      if (t.closest("#adminUnblockUser")) {
+        e.preventDefault();
+        e.stopPropagation();
+        void patchSelectedUserBanned(false, navigate, rerender);
+      }
+    },
+    true
+  );
+
+  document.querySelector("#adminDeleteUser")?.addEventListener("click", async () => {
+    const id = Number(state.adminUi.selectedId);
+    if (!id || id === 1 || id === Number(state.userId)) return;
+    if (!(await requestConfirm("Удалить пользователя и все связанные данные?", "Удалить"))) return;
+    try {
+      await apiRequest(`/users/${id}`, { method: "DELETE" }, state.token);
+      notify("Пользователь удалён", "success");
+      state.adminUi.selectedId = null;
+      await fetchAdminUsers(navigate, rerender);
+    } catch (error) {
+      if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
+      notify(parseApiError(error, "Не удалось удалить"), "error");
+    }
+  });
+
+  void fetchAdminUsers(navigate, rerender);
+}
+
 function parseApiError(error, fallback) {
   const raw = String(error?.message || "").trim();
   if (!raw) return fallback;
+  if (
+    raw === "Failed to fetch" ||
+    raw.includes("Failed to fetch") ||
+    raw === "Load failed" ||
+    raw.includes("NetworkError") ||
+    raw.includes("Network request failed")
+  ) {
+    return "Сервер не отвечает. Если API только запустился, подождите пару секунд и обновите страницу.";
+  }
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed?.details) && parsed.details.length > 0) {
@@ -1034,6 +1495,7 @@ function parseApiError(error, fallback) {
       if (field === "password") return "Пароль слишком короткий. Минимум 8 символов.";
       if (field === "fullName") return "ФИО слишком короткое. Введите минимум 3 символа.";
       if (field === "role") return "Роль выбрана неверно. Выберите из списка.";
+      if (field === "librarianCode") return issue.message || "Нужен код из 10 цифр от администратора.";
       return field ? `Ошибка в поле «${field}»: ${issue.message}` : `Ошибка: ${issue.message}`;
     }
     if (String(parsed?.message || "").includes("External text source timed out")) {

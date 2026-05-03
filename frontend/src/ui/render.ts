@@ -1,5 +1,12 @@
 // @ts-nocheck
-import { ROLE_LABELS, canEditThisBook, canDeleteThisBook, canManageCatalog, state } from "../core/state";
+import {
+  ROLE_LABELS,
+  canAccessAdminPanel,
+  canEditThisBook,
+  canDeleteThisBook,
+  canManageCatalog,
+  state
+} from "../core/state";
 import { bookTextUrl } from "../api/http";
 
 const MAX_TOASTS = 3;
@@ -77,6 +84,10 @@ export function notify(message, kind = "info") {
 
 export function renderLayout(app, page) {
   const authed = Boolean(state.token);
+  const adminTab =
+    authed && canAccessAdminPanel()
+      ? `<a href="/admin" data-nav class="${page === "/admin" ? "active" : ""}">Управление</a>`
+      : "";
   app.innerHTML = `
   <main class="layout wide">
     <section class="workspace-shell">
@@ -91,6 +102,7 @@ export function renderLayout(app, page) {
               <a href="/auth" data-nav class="${page === "/auth" ? "active" : ""}">${authed ? "Аккаунт" : "Вход"}</a>
               <a href="/library" data-nav class="${page === "/library" ? "active" : ""}">Библиотека</a>
               ${authed ? `<a href="/personal" data-nav class="${page === "/personal" ? "active" : ""}">Личная библиотека</a>` : ""}
+              ${adminTab}
           </nav>
           <div class="hero-actions">
             ${authed ? `<button id="logout" class="danger">Выйти</button>` : ""}
@@ -114,7 +126,9 @@ function renderFooter(page) {
         ? "Аккаунт"
         : page === "/personal"
           ? "Личная библиотека"
-          : "Каталог";
+          : page === "/admin"
+            ? "Управление"
+            : "Каталог";
   return `<footer class="footer glass">
     <div class="footer-row">
       <div class="footer-brand">
@@ -203,9 +217,17 @@ function renderPage(page) {
             <div class="profile-stat"><strong>${state.profileStats.personalBooks}</strong><span>Личных книг</span></div>
             <div class="profile-stat"><strong>${state.profileStats.favorites}</strong><span>В избранном</span></div>
           </div>
+          <h3 class="profile-subheading">Сменить пароль</h3>
+          <form id="changePasswordForm" class="change-password-form">
+            <input name="currentPassword" type="password" placeholder="Текущий пароль" required minlength="8" autocomplete="current-password" />
+            <input name="newPassword" type="password" placeholder="Новый пароль" required minlength="8" autocomplete="new-password" />
+            <input name="newPassword2" type="password" placeholder="Повтор нового пароля" required minlength="8" autocomplete="new-password" />
+            <button type="submit">Обновить пароль</button>
+          </form>
           <div class="inline-actions">
             <button type="button" id="goLibraryBtn">Открыть библиотеку</button>
             <button type="button" id="goPersonalBtn" class="secondary">Личная библиотека</button>
+            ${canAccessAdminPanel() ? `<button type="button" id="goAdminBtn" class="secondary">Управление</button>` : ""}
           </div>
         </article>
         <article class="card glass status-card profile-side">
@@ -234,6 +256,10 @@ function renderPage(page) {
 
   if (page === "/personal") {
     return renderPersonalPage();
+  }
+
+  if (page === "/admin") {
+    return renderAdminPage();
   }
 
   return renderLibraryPage();
@@ -284,8 +310,8 @@ function renderLibraryPage() {
 function renderPersonalPage() {
   const catalogSection = canManageCatalog()
     ? `<article class="card glass personal-block">
-        <h3>${state.editingCatalogId ? "Редактировать книгу фонда" : "Добавить в общий каталог"}</h3>
-        <p class="hint">Только для библиотекаря: книга попадает в общий каталог (видна всем).</p>
+        <h3>${state.editingCatalogId ? "Редактировать публикацию" : "Опубликовать книгу"}</h3>
+        <p class="hint">Книга появится в общем каталоге для всех читателей. После сохранения обновите страницу каталога или откройте «Библиотека» — запись подтянется с сервера.</p>
         ${catalogBookForm()}
       </article>`
     : "";
@@ -310,6 +336,71 @@ function renderPersonalPage() {
         <div id="myBookList" class="book-grid personal-book-grid"></div>
       </article>
       ${catalogSection}
+    </div>
+  </section>`;
+}
+
+function renderAdminPage() {
+  if (!canAccessAdminPanel()) {
+    return `<section class="personal-page"><p class="empty">Доступно только администратору.</p></section>`;
+  }
+  return `<section class="personal-page admin-page">
+    <div class="catalog-top personal-header">
+      <h2>Управление</h2>
+      <button type="button" id="profileMiniBtn" class="profile-mini" title="Открыть аккаунт">
+        <div class="profile-mini-avatar">${profileInitials(state.userFullName)}</div>
+        <span>${escapeAttr(state.userFullName || "Пользователь")}</span>
+      </button>
+    </div>
+    <div class="admin-grid">
+      <article class="card glass admin-block">
+        <h3>Пользователи</h3>
+        <p class="hint">Стрелки вверх/вниз и Enter — выбор в списке. Сгенерируйте код и передайте его будущему библиотекарю для регистрации.</p>
+        <div class="admin-toolbar">
+          <input id="adminUserSearch" type="search" placeholder="Поиск по email или ФИО" autocomplete="off" />
+          <button type="button" id="adminGenCodeBtn" class="secondary">Новый код (10 цифр)</button>
+        </div>
+        <p id="adminLibrarianCodeLine" class="admin-code-line hint" aria-live="polite"></p>
+        <div id="adminUserList" class="admin-user-list" tabindex="0" role="listbox" aria-label="Список пользователей"></div>
+        <div class="admin-pagination">
+          <span id="adminPageLabel" class="admin-page-label"></span>
+          <div class="admin-pag-buttons">
+            <button type="button" id="adminPrevPage" class="secondary">Назад</button>
+            <button type="button" id="adminNextPage" class="secondary">Вперёд</button>
+          </div>
+        </div>
+      </article>
+      <article class="card glass admin-block" id="adminDetailCard">
+        <h3>Данные пользователя</h3>
+        <p class="hint" id="adminDetailPlaceholder">Выберите строку в списке слева.</p>
+        <form id="adminUserForm" class="admin-user-form" hidden>
+          <input type="hidden" id="adminFormUserId" name="userId" value="" />
+          <label class="admin-field"><span>ФИО</span><input name="fullName" id="adminFormFullName" type="text" required /></label>
+          <label class="admin-field"><span>Email</span><input name="email" id="adminFormEmail" type="email" required /></label>
+          <label class="admin-field"><span>Роль</span>
+            <select name="role" id="adminFormRole">
+              <option value="READER">Читатель</option>
+              <option value="LIBRARIAN">Библиотекарь</option>
+              <option value="ADMIN">Администратор</option>
+            </select>
+          </label>
+          <div class="admin-ban-block">
+            <p class="admin-ban-line" id="adminBanLine">Статус: <span id="adminBanStateText">—</span></p>
+            <div class="admin-ban-actions">
+              <button type="button" id="adminBlockUser" class="admin-btn-block">Заблокировать</button>
+              <button type="button" id="adminUnblockUser" class="admin-btn-unblock secondary">Разблокировать</button>
+            </div>
+          </div>
+          <div class="admin-field">
+            <span>Новый пароль (задаёт админ)</span>
+            <input name="newAdminPassword" id="adminFormNewPass" type="password" minlength="8" autocomplete="new-password" placeholder="Оставьте пустым, если не менять пароль" />
+          </div>
+          <div class="admin-form-actions">
+            <button type="submit">Сохранить изменения</button>
+            <button type="button" id="adminDeleteUser" class="danger">Удалить аккаунт</button>
+          </div>
+        </form>
+      </article>
     </div>
   </section>`;
 }
@@ -381,17 +472,21 @@ function registerForm() {
       "Читатель",
       [
         { value: "READER", label: "Читатель" },
-        { value: "LIBRARIAN", label: "Библиотекарь" },
-        { value: "ADMIN", label: "Администратор" }
+        { value: "LIBRARIAN", label: "Библиотекарь" }
       ],
       "READER"
     )}
+    <div id="registerLibrarianWrap" class="register-librarian-wrap" hidden>
+      <label class="admin-field"><span>Код библиотекаря (10 цифр)</span>
+        <input name="librarianCode" id="registerLibrarianCode" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="14" autocomplete="one-time-code" placeholder="0000000000" />
+      </label>
+    </div>
     <button type="submit">Создать аккаунт</button>
   </form>`;
 }
 
 function personalBookForm() {
-  return `<h4 id="personalFormHeading">${state.editingId ? "Редактировать мою книгу" : "Добавить свою книгу"}</h4>
+  return `<h4 id="personalFormHeading">${state.editingId ? "Редактировать мою книгу" : "Добавить книгу в личную библиотеку"}</h4>
   <form id="personalBookForm">
     <input name="title" placeholder="Название" required />
     <input name="author" placeholder="Автор" required />
@@ -417,11 +512,28 @@ function personalBookForm() {
         "Классика"
       ]
     )}
-    <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
-    <label class="file-label">
-      Загрузить обложку
-      <input name="coverFile" id="personalCoverFile" type="file" accept="image/*" />
-    </label>
+    <div class="cover-url-wrap" id="personalCoverUrlWrap">
+      <input name="coverUrl" id="personalCoverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
+      <div class="cover-url-custom-tip" id="personalCoverUrlTip" role="tooltip" aria-hidden="true">
+        Сначала удалите файл обложки, чтобы указать ссылку из интернета.
+      </div>
+    </div>
+    <div class="file-block file-block-personal">
+      <div class="file-block-heading">Загрузить обложку</div>
+      <div class="file-personal-row-wrap" id="personalCoverFileRowWrap">
+        <div class="file-personal-row">
+          <label class="file-fake-btn file-fake-btn-row">
+            <input name="coverFile" id="personalCoverFile" type="file" accept="image/*" class="input-file-overlay" />
+            <span data-personal-file-btn-text>Выбрать файл</span>
+          </label>
+          <button type="button" id="personalCoverFileRemove" class="file-remove-btn secondary" hidden>Удалить файл</button>
+        </div>
+        <div class="cover-url-custom-tip file-cover-row-tip" id="personalCoverFileTip" role="tooltip" aria-hidden="true">
+          Сначала очистите поле со ссылкой на обложку, чтобы загрузить файл с компьютера.
+        </div>
+      </div>
+      <div id="personalCoverFileStatus" class="file-status-text" aria-live="polite"></div>
+    </div>
     <div id="personalCoverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
       ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
@@ -467,7 +579,7 @@ function catalogBookForm() {
     <input name="textUrl" type="url" placeholder="Ссылка на полный текст (.txt), необязательно" />
     <textarea name="contentText" rows="4" placeholder="Фрагмент или полный текст в каталоге"></textarea>
     <div class="inline-actions">
-      <button type="submit">${state.editingCatalogId ? "Сохранить в фонде" : "Добавить в фонд"}</button>
+      <button type="submit">${state.editingCatalogId ? "Сохранить публикацию" : "Опубликовать"}</button>
       <button type="button" id="cancelCatalogEdit" class="secondary">Сбросить</button>
     </div>
   </form>`;
@@ -548,6 +660,41 @@ export function renderPersonalMyBooksListOnly() {
 export function renderPersonalLists() {
   renderPersonalFavoritesListOnly();
   renderPersonalMyBooksListOnly();
+}
+
+export function renderAdminUserListDom() {
+  const list = document.querySelector("#adminUserList");
+  const label = document.querySelector("#adminPageLabel");
+  const codeLine = document.querySelector("#adminLibrarianCodeLine");
+  if (codeLine) {
+    codeLine.textContent = state.adminUi.lastLibrarianCode
+      ? `Код для регистрации библиотекаря: ${state.adminUi.lastLibrarianCode}`
+      : "";
+  }
+  if (!list) return;
+  const items = state.adminUi.items || [];
+  if (!items.length) {
+    list.innerHTML = state.adminUi.loading
+      ? `<p class="empty">Загрузка…</p>`
+      : `<p class="empty">Пользователи не найдены.</p>`;
+  } else {
+    list.innerHTML = items
+      .map((u, idx) => {
+        const same = Number(u.id) === Number(state.adminUi.selectedId);
+        const sel = same ? " is-selected" : "";
+        const kb = idx === state.adminUi.kbIndex ? " is-kb-active" : "";
+        const roleRu = ROLE_LABELS[u.role] || u.role;
+        return `<button type="button" class="admin-user-row${sel}${kb}" data-admin-user="${u.id}" role="option" aria-selected="${same}">
+          <span class="au-name">${escapeAttr(u.fullName)}</span>
+          <span class="au-email">${escapeAttr(u.email)}</span>
+          <span class="au-meta">${escapeAttr(roleRu)}${u.banned ? " · заблокирован" : ""} · id ${u.id}</span>
+        </button>`;
+      })
+      .join("");
+  }
+  if (label) {
+    label.textContent = `Страница ${state.adminUi.page} из ${state.adminUi.pages || 1} · всего ${state.adminUi.total}`;
+  }
 }
 
 export function syncReadModal() {

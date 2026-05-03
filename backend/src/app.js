@@ -5,6 +5,7 @@ const morgan = require("morgan");
 const { corsOrigins } = require("./config/env");
 const authRouter = require("./routes/auth.routes");
 const bookRouter = require("./routes/book.routes");
+const userRouter = require("./routes/user.routes");
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -23,6 +24,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+app.use("/api/users", userRouter);
 app.use("/api/books", bookRouter);
 app.use(errorHandler);
 

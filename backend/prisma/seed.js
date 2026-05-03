@@ -4,20 +4,10 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 async function main() {
-  const adminPass = await bcrypt.hash("Admin123!", 10);
   const readerPass = await bcrypt.hash("Reader123!", 10);
   const librarianPass = await bcrypt.hash("Librarian123!", 10);
 
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@library.local" },
-    update: {},
-    create: {
-      fullName: "System Administrator",
-      email: "admin@library.local",
-      passwordHash: adminPass,
-      role: "ADMIN"
-    }
-  });
+  /* Служебный администратор id=1 создаётся при старте API (ensureBootstrapAdmin). */
 
   const librarian = await prisma.user.upsert({
     where: { email: "librarian@library.local" },
@@ -117,7 +107,7 @@ async function main() {
     }
   }
 
-  console.log("Seed completed:", { adminId: admin.id, librarianId: librarian.id, readerId: reader.id });
+  console.log("Seed completed:", { librarianId: librarian.id, readerId: reader.id });
 }
 
 main()

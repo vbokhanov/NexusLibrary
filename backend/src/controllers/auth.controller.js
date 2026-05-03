@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../config/prisma");
-const { loginSchema, registerSchema } = require("../validators/auth.validator");
+const { loginSchema, registerSchema, changePasswordSchema } = require("../validators/auth.validator");
 const { signAccessToken } = require("../utils/tokens");
 
 async function register(req, res, next) {
@@ -12,19 +12,53 @@ async function register(req, res, next) {
       return res.status(409).json({ message: "Email is already used" });
     }
 
-    const passwordHash = await bcrypt.hash(input.password, 10);
+    const role = input.role || "READER";
+    const librarianDigits =
+      role === "LIBRARIAN" ? String(input.librarianCode || "").replace(/\D/g, "") : "";
 
+    if (role === "LIBRARIAN") {
+      const codeRow = await prisma.librarianInviteCode.findFirst({
+        where: { code: librarianDigits, used: false }
+      });
+      if (!codeRow) {
+        return res.status(403).json({ message: "Неверный или уже использованный код библиотекаря" });
+      }
+
+      const passwordHash = await bcrypt.hash(input.password, 10);
+
+      const user = await prisma.$transaction(async (tx) => {
+        await tx.librarianInviteCode.update({
+          where: { id: codeRow.id },
+          data: { used: true, usedAt: new Date() }
+        });
+        return tx.user.create({
+          data: {
+            fullName: input.fullName,
+            email: input.email,
+            passwordHash,
+            role: "LIBRARIAN"
+          }
+        });
+      });
+
+      const token = signAccessToken({ id: user.id, email: user.email, role: user.role });
+      return res.status(201).json({
+        token,
+        user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role }
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(input.password, 10);
     const user = await prisma.user.create({
       data: {
         fullName: input.fullName,
         email: input.email,
         passwordHash,
-        role: input.role || "READER"
+        role: "READER"
       }
     });
 
     const token = signAccessToken({ id: user.id, email: user.email, role: user.role });
-
     return res.status(201).json({
       token,
       user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role }
@@ -43,6 +77,10 @@ async function login(req, res, next) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    if (user.banned) {
+      return res.status(403).json({ message: "Аккаунт заблокирован. Обратитесь к администратору." });
+    }
+
     const isValid = await bcrypt.compare(input.password, user.passwordHash);
     if (!isValid) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -58,4 +96,27 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, login };
+async function changePassword(req, res, next) {
+  try {
+    const input = changePasswordSchema.parse(req.body);
+    const userId = req.user.id;
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const ok = await bcrypt.compare(input.currentPassword, user.passwordHash);
+    if (!ok) return res.status(400).json({ message: "Текущий пароль указан неверно" });
+
+    const passwordHash = await bcrypt.hash(input.newPassword, 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash }
+    });
+
+    return res.json({ message: "Пароль обновлён" });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = { register, login, changePassword };

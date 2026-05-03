@@ -19,10 +19,24 @@ model User {
   email        String   @unique
   passwordHash String
   role         Role     @default(READER)
+  banned       Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   borrows      Borrow[]
   ownedBooks   Book[]   @relation("BookOwner")
+  librarianCodesCreated LibrarianInviteCode[] @relation("LibrarianCodesCreated")
+}
+
+model LibrarianInviteCode {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique
+  createdById Int
+  creator     User      @relation("LibrarianCodesCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  used        Boolean   @default(false)
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([code, used])
 }
 
 model Book {

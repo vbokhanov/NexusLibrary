@@ -53,5 +53,17 @@ export function validateRegister(payload) {
   if (String(payload.fullName || "").trim().length < 3) return "ФИО слишком короткое";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(payload.email || "").trim())) return "Введите корректный email";
   if (String(payload.password || "").length < 8) return "Пароль минимум 8 символов";
+  const role = String(payload.role || "READER").toUpperCase();
+  if (role === "LIBRARIAN") {
+    const digits = String(payload.librarianCode || "").replace(/\D/g, "");
+    if (!/^\d{10}$/.test(digits)) return "Введите код из 10 цифр (его выдаёт администратор)";
+  }
+  return "";
+}
+
+export function validateChangePassword(payload) {
+  if (String(payload.currentPassword || "").length < 8) return "Текущий пароль: минимум 8 символов";
+  if (String(payload.newPassword || "").length < 8) return "Новый пароль: минимум 8 символов";
+  if (String(payload.newPassword) !== String(payload.newPassword2 || "")) return "Новые пароли не совпадают";
   return "";
 }

@@ -82,7 +82,20 @@ export const state = {
     personalBooks: 0,
     catalogBooks: 0
   },
-  profileStatsLoading: false
+  profileStatsLoading: false,
+  /** Панель администратора: список пользователей и выбор */
+  adminUi: {
+    items: [],
+    total: 0,
+    page: 1,
+    limit: 12,
+    pages: 1,
+    q: "",
+    kbIndex: 0,
+    selectedId: null,
+    loading: false,
+    lastLibrarianCode: ""
+  }
 };
 
 // Normalize stale localStorage state: no token means guest session.
@@ -99,7 +112,14 @@ if (!state.token) {
 
 export function getCurrentPath() {
   const path = location.pathname || "/";
-  return ["/", "/auth", "/library", "/personal"].includes(path) ? path : "/";
+  const allowed = ["/", "/auth", "/library", "/personal", "/admin"];
+  if (!allowed.includes(path)) return "/";
+  if (path === "/admin" && state.role !== "ADMIN") return "/library";
+  return path;
+}
+
+export function canAccessAdminPanel() {
+  return state.role === "ADMIN";
 }
 
 /** Каталог библиотеки: добавление / правка записей фонда */

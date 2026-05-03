@@ -1,7 +1,33 @@
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
-export async function apiRequest(endpoint: string, options: RequestInit, token = "") {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function requestMethodUpper(options: RequestInit) {
+  return String(options?.method || "GET").toUpperCase();
+}
+
+/** Повтор только для безопасных методов: после перезапуска API первый fetch часто падает, пока порт не готов. */
+function shouldRetryTransientOnMethod(method: string) {
+  return method === "GET" || method === "HEAD";
+}
+
+function isTransientNetworkFailure(err: unknown) {
+  if (!err || typeof err !== "object") return false;
+  const name = String((err as Error).name || "");
+  const msg = String((err as Error).message || "");
+  if (name !== "TypeError") return false;
+  return (
+    msg.includes("Failed to fetch") ||
+    msg.includes("Load failed") ||
+    msg.includes("NetworkError") ||
+    msg.includes("Network request failed")
+  );
+}
+
+async function doFetch(endpoint: string, options: RequestInit, token: string) {
+  return fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -9,17 +35,36 @@ export async function apiRequest(endpoint: string, options: RequestInit, token =
       ...(options.headers || {})
     }
   });
+}
 
-  if (!response.ok) {
-    const text = await response.text();
-    const error = new Error(text || "Request failed");
-    // @ts-ignore status is attached for consumers in plain JS mode
-    error.status = response.status;
-    throw error;
+export async function apiRequest(endpoint: string, options: RequestInit, token = "") {
+  const method = requestMethodUpper(options);
+  const maxAttempts = shouldRetryTransientOnMethod(method) ? 3 : 1;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const response = await doFetch(endpoint, options, token);
+
+      if (!response.ok) {
+        const text = await response.text();
+        const error = new Error(text || "Request failed");
+        // @ts-ignore status is attached for consumers in plain JS mode
+        error.status = response.status;
+        throw error;
+      }
+
+      if (response.status === 204) return null;
+      return response.json();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < maxAttempts - 1 && isTransientNetworkFailure(e)) {
+        await sleep(280 * (attempt + 1));
+        continue;
+      }
+      throw e;
+    }
   }
-
-  if (response.status === 204) return null;
-  return response.json();
+  throw lastErr;
 }
 
 export function bookTextUrl(bookId: number, download: boolean) {
