@@ -22,7 +22,7 @@ const catalogBookSchema = z.object({
 const personalBookSchema = z.object({
   title: z.string().min(1).max(180),
   author: z.string().min(2).max(120),
-  year: z.number().int().min(1800).max(new Date().getFullYear()),
+  year: z.number().int().min(500).max(new Date().getFullYear()),
   genre: z.string().min(2).max(60),
   coverUrl: z
     .string()

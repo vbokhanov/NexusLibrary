@@ -23,10 +23,10 @@ export function validateBook(payload) {
 
 export function validatePersonalBook(payload) {
   const errors = [];
-  if (!payload.title || payload.title.trim().length < 2) errors.push("Название: минимум 2 символа");
+  if (!payload.title || payload.title.trim().length < 1) errors.push("Название: минимум 1 символ");
   if (!payload.author || payload.author.trim().length < 2) errors.push("Автор: минимум 2 символа");
-  if (!Number.isInteger(payload.year) || payload.year < 1800 || payload.year > new Date().getFullYear()) {
-    errors.push("Год: некорректное значение");
+  if (!Number.isInteger(payload.year) || payload.year < 500 || payload.year > new Date().getFullYear()) {
+    errors.push("Год: от 500 до текущего года");
   }
   if (!payload.genre || payload.genre.trim().length < 2) errors.push("Жанр: минимум 2 символа");
   if (

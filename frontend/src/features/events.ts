@@ -2,7 +2,14 @@
 import { apiRequest, fetchBookPlainText } from "../api/http";
 import { canManageCatalog, loadFavoritesForSession, saveFavoritesForSession, state } from "../core/state";
 import { validateBook, validateLogin, validatePersonalBook, validateRegister } from "../core/validators";
-import { notify, renderCatalogGrid, renderPersonalLists, syncReadModal } from "../ui/render";
+import {
+  notify,
+  renderCatalogGrid,
+  renderPersonalFavoritesListOnly,
+  renderPersonalLists,
+  renderPersonalMyBooksListOnly,
+  syncReadModal
+} from "../ui/render";
 
 let catalogObserver = null;
 let searchDebounceTimer = null;
@@ -11,6 +18,29 @@ let lastCatalogInfiniteFetch = 0;
 let catalogScrollListener = null;
 let outsideSelectClickHandler = null;
 let toTopScrollHandler = null;
+let dropdownKbHandler = null;
+
+const customSelectHandlers = new Map();
+
+function visibleMenuOptions(menu, selector) {
+  if (!menu) return [];
+  return [...menu.querySelectorAll(selector)].filter((el) => el.offsetParent !== null);
+}
+
+function syncCustomSelectKbHighlight(root) {
+  const menu = root.querySelector("[data-select-menu]");
+  const opts = visibleMenuOptions(menu, "[data-select-option]");
+  opts.forEach((o) => o.classList.remove("is-kb-active"));
+  const preferred = opts.findIndex((o) => o.classList.contains("is-selected"));
+  const idx = preferred >= 0 ? preferred : 0;
+  if (opts[idx]) opts[idx].classList.add("is-kb-active");
+}
+
+function syncComboKbHighlight(menu) {
+  const opts = visibleMenuOptions(menu, "[data-combo-option]");
+  opts.forEach((o) => o.classList.remove("is-kb-active"));
+  if (opts[0]) opts[0].classList.add("is-kb-active");
+}
 
 function catalogPageSize() {
   if (typeof window === "undefined") return 10;
@@ -20,11 +50,70 @@ function catalogPageSize() {
   return 12;
 }
 
+let confirmResolve = null;
+
+function isConfirmModalOpen() {
+  const root = document.getElementById("confirmModalRoot");
+  return Boolean(root && !root.hasAttribute("hidden"));
+}
+
+function hideConfirmModal() {
+  const root = document.getElementById("confirmModalRoot");
+  if (root) root.setAttribute("hidden", "");
+}
+
+function finishConfirm(value) {
+  const r = confirmResolve;
+  confirmResolve = null;
+  hideConfirmModal();
+  if (r) r(value);
+}
+
+function ensureConfirmModalDom() {
+  let root = document.getElementById("confirmModalRoot");
+  if (root) return root;
+  root = document.createElement("div");
+  root.id = "confirmModalRoot";
+  root.className = "read-backdrop confirm-modal-overlay";
+  root.setAttribute("hidden", "");
+  root.innerHTML = `
+    <div class="confirm-modal-panel glass" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalMessage">
+      <p id="confirmModalMessage" class="confirm-modal-message"></p>
+      <div class="confirm-modal-actions">
+        <button type="button" id="confirmModalCancel" class="secondary">Отмена</button>
+        <button type="button" id="confirmModalOk" class="danger">Удалить</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  root.addEventListener("click", (e) => {
+    if (e.target === root) finishConfirm(false);
+  });
+  root.querySelector("#confirmModalOk").addEventListener("click", () => finishConfirm(true));
+  root.querySelector("#confirmModalCancel").addEventListener("click", () => finishConfirm(false));
+  return root;
+}
+
+function openConfirmModal(message, confirmLabel = "Удалить") {
+  const root = ensureConfirmModalDom();
+  root.querySelector("#confirmModalMessage").textContent = message;
+  root.querySelector("#confirmModalOk").textContent = confirmLabel;
+  root.removeAttribute("hidden");
+}
+
+export function requestConfirm(message, confirmLabel = "Удалить") {
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+    openConfirmModal(message, confirmLabel);
+  });
+}
+
 export function bindEvents({ page, navigate, rerender }) {
   bindNavigation(navigate);
   bindLogout(rerender);
   bindReadModalChrome();
   bindGlobalCustomSelectClose();
+  bindDropdownKeyboard();
   bindToTopButton();
   if (page === "/") bindHome(navigate);
   if (page === "/auth") bindAuth(navigate, rerender);
@@ -109,11 +198,78 @@ function bindGlobalCustomSelectClose() {
   }
   outsideSelectClickHandler = (event) => {
     if (event.button !== 0) return;
-    const inside = event.target.closest(".custom-select");
+    const inside = event.target.closest(".custom-select") || event.target.closest(".combo-select");
     if (inside) return;
     document.querySelectorAll(".custom-select.open").forEach((item) => item.classList.remove("open"));
+    document.querySelectorAll(".combo-select.open").forEach((item) => item.classList.remove("open"));
   };
   document.addEventListener("mousedown", outsideSelectClickHandler);
+}
+
+function bindDropdownKeyboard() {
+  if (dropdownKbHandler) document.removeEventListener("keydown", dropdownKbHandler, true);
+  dropdownKbHandler = (e) => {
+    if (e.key === "Escape" && isConfirmModalOpen()) {
+      e.preventDefault();
+      e.stopPropagation();
+      finishConfirm(false);
+      return;
+    }
+    if (e.key === "Escape" && state.readModalOpen) return;
+    const comboRoot = document.querySelector(".combo-select.open");
+    const customRoot = document.querySelector(".custom-select.open");
+
+    if (e.key === "Escape") {
+      if (comboRoot) {
+        e.preventDefault();
+        comboRoot.classList.remove("open");
+        return;
+      }
+      if (customRoot) {
+        e.preventDefault();
+        customRoot.classList.remove("open");
+      }
+      return;
+    }
+
+    if (!customRoot) return;
+
+    const menu = customRoot.querySelector("[data-select-menu]");
+    if (!menu) return;
+    const opts = visibleMenuOptions(menu, "[data-select-option]");
+    if (!opts.length) return;
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      let activeIdx = opts.findIndex((o) => o.classList.contains("is-kb-active"));
+      if (e.key === "ArrowDown") {
+        if (activeIdx < 0) activeIdx = 0;
+        else activeIdx = Math.min(opts.length - 1, activeIdx + 1);
+      } else {
+        if (activeIdx < 0) activeIdx = opts.length - 1;
+        else activeIdx = Math.max(0, activeIdx - 1);
+      }
+      opts.forEach((o) => o.classList.remove("is-kb-active"));
+      opts[activeIdx].classList.add("is-kb-active");
+      opts[activeIdx].scrollIntoView({ block: "nearest" });
+      return;
+    }
+
+    if (e.key === "Enter" || e.key === " ") {
+      const active =
+        opts.find((o) => o.classList.contains("is-kb-active")) ||
+        opts.find((o) => o.classList.contains("is-selected"));
+      if (!active) return;
+      e.preventDefault();
+      const id = customRoot.getAttribute("data-custom-select");
+      const cb = customSelectHandlers.get(id);
+      customRoot.classList.remove("open");
+      opts.forEach((o) => o.classList.remove("is-kb-active", "is-selected"));
+      active.classList.add("is-selected");
+      if (cb) cb(active.dataset.value, active);
+    }
+  };
+  document.addEventListener("keydown", dropdownKbHandler, true);
 }
 
 function bindToTopButton() {
@@ -414,12 +570,12 @@ async function onCatalogListClick(event) {
     window.dispatchEvent(new PopStateEvent("popstate"));
     return;
   }
-  if (action === "delete") return deleteCatalogBook(id);
+  if (action === "delete") return deleteCatalogBook(id, { refreshLibrary: true });
 }
 
 async function deleteCatalogBook(id, options = { refreshLibrary: true }) {
   if (!state.token || !canManageCatalog()) return notify("Удаление фонда доступно библиотекарю или администратору", "warning");
-  if (!window.confirm("Удалить книгу из общего каталога?")) return;
+  if (!(await requestConfirm("Удалить книгу из общего каталога?", "Удалить"))) return;
   try {
     await apiRequest(`/books/${id}`, { method: "DELETE" }, state.token);
     notify("Книга удалена", "success");
@@ -466,7 +622,8 @@ function bindPersonal(navigate, rerender) {
 
   (async () => {
     try {
-      await loadPersonalData();
+      const favoritesNeedFetch = state.favorites.length > 0 && state.favoriteBooks.length === 0;
+      await loadPersonalData({ mine: true, favorites: favoritesNeedFetch });
     } catch (error) {
       if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось загрузить данные"), "error");
@@ -474,25 +631,39 @@ function bindPersonal(navigate, rerender) {
   })();
 }
 
-async function loadPersonalData() {
-  const [mine, favIds] = await Promise.all([
-    apiRequest("/books/mine", { method: "GET" }, state.token),
-    Promise.resolve(state.favorites)
-  ]);
-  state.myBooks = Array.isArray(mine) ? mine : [];
-  if (favIds.length) {
-    const batch = await apiRequest(`/books/favorites/batch?ids=${favIds.join(",")}`, { method: "GET" }, state.token);
-    state.favoriteBooks = Array.isArray(batch) ? batch : [];
-    // Remove stale favorite IDs if books were deleted from catalog.
-    const validIds = state.favoriteBooks.map((b) => b.id);
-    if (validIds.length !== favIds.length) {
-      state.favorites = state.favorites.filter((id) => validIds.includes(id));
-      saveFavoritesForSession(state.token, state.userId, state.favorites);
-      state.profileStats.favorites = state.favorites.length;
-    }
-  } else state.favoriteBooks = [];
+async function loadPersonalData(options = { mine: true, favorites: true }) {
+  const loadMine = options.mine !== false;
+  const loadFav = options.favorites !== false;
 
-  if (state.editingCatalogId) {
+  const tasks = [];
+  if (loadMine) {
+    tasks.push(
+      (async () => {
+        const mine = await apiRequest("/books/mine", { method: "GET" }, state.token);
+        state.myBooks = Array.isArray(mine) ? mine : [];
+      })()
+    );
+  }
+  if (loadFav) {
+    tasks.push(
+      (async () => {
+        const favIds = state.favorites;
+        if (favIds.length) {
+          const batch = await apiRequest(`/books/favorites/batch?ids=${favIds.join(",")}`, { method: "GET" }, state.token);
+          state.favoriteBooks = Array.isArray(batch) ? batch : [];
+          const validIds = state.favoriteBooks.map((b) => b.id);
+          if (validIds.length !== favIds.length) {
+            state.favorites = state.favorites.filter((id) => validIds.includes(id));
+            saveFavoritesForSession(state.token, state.userId, state.favorites);
+            state.profileStats.favorites = state.favorites.length;
+          }
+        } else state.favoriteBooks = [];
+      })()
+    );
+  }
+  await Promise.all(tasks);
+
+  if (loadMine && state.editingCatalogId) {
     const exists = state.catalogItems.find((b) => b.id === state.editingCatalogId);
     let book = exists;
     if (!book) {
@@ -504,13 +675,36 @@ async function loadPersonalData() {
     }
     if (book) queueMicrotask(() => fillCatalogForm(book));
   }
-  if (state.editingId) {
+  if (loadMine && state.editingId) {
     const b = state.myBooks.find((x) => x.id === state.editingId);
     if (b) queueMicrotask(() => fillPersonalForm(b));
     else state.editingId = null;
   }
 
-  renderPersonalLists();
+  // Всегда перерисовываем оба списка из state (после полного rerender DOM пустой; без лишнего запроса избранного).
+  renderPersonalFavoritesListOnly();
+  renderPersonalMyBooksListOnly();
+}
+
+function resetPersonalBookFormAfterSave() {
+  const form = document.querySelector("#personalBookForm");
+  if (form) {
+    form.reset();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.textContent = "Добавить";
+  }
+  const heading = document.querySelector("#personalFormHeading");
+  if (heading) heading.textContent = "Добавить свою книгу";
+  const genreHidden = document.querySelector("#personalGenre");
+  if (genreHidden) genreHidden.value = "";
+  const comboRoot = document.querySelector('[data-combo-select="personalGenre"]');
+  comboRoot?.classList.remove("open");
+  const comboInput = comboRoot?.querySelector("[data-combo-input]");
+  if (comboInput) comboInput.value = "";
+  const coverFile = document.querySelector("#personalCoverFile");
+  if (coverFile) coverFile.value = "";
+  state.coverDraft = "";
+  updatePersonalPreview();
 }
 
 function fillPersonalForm(book) {
@@ -554,7 +748,7 @@ async function onPersonalListsClick(event, navigate, rerender) {
   if (action === "read") return openReadModal(id);
   if (action === "favorite") {
     toggleFavorite(id);
-    await loadPersonalData();
+    await loadPersonalData({ mine: false, favorites: true });
     return;
   }
   if (action === "edit-mine") {
@@ -564,13 +758,15 @@ async function onPersonalListsClick(event, navigate, rerender) {
     return;
   }
   if (action === "delete-mine") {
-    if (!window.confirm("Удалить вашу книгу?")) return;
+    if (!(await requestConfirm("Удалить вашу книгу?", "Удалить"))) return;
     try {
       await apiRequest(`/books/${id}`, { method: "DELETE" }, state.token);
       notify("Удалено", "success");
-      state.editingId = null;
-      await loadPersonalData();
-      rerender();
+      if (state.editingId === id) {
+        state.editingId = null;
+        resetPersonalBookFormAfterSave();
+      }
+      await loadPersonalData({ mine: true, favorites: false });
     } catch (error) {
       if (isUnauthorizedError(error)) return handleUnauthorized(rerender, navigate);
       notify(parseApiError(error, "Не удалось удалить"), "error");
@@ -585,7 +781,7 @@ async function onPersonalListsClick(event, navigate, rerender) {
   }
   if (action === "delete") {
     await deleteCatalogBook(id, { refreshLibrary: false });
-    await loadPersonalData();
+    await loadPersonalData({ mine: true, favorites: true });
     rerender();
   }
 }
@@ -610,10 +806,8 @@ async function submitPersonalBook(e, rerender) {
     }
     state.editingId = null;
     state.coverDraft = "";
-    e.currentTarget.reset();
-    updatePersonalPreview();
-    await loadPersonalData();
-    rerender();
+    await loadPersonalData({ mine: true, favorites: false });
+    resetPersonalBookFormAfterSave();
   } catch (error) {
     if (isUnauthorizedError(error)) return handleUnauthorized(rerender, null);
     notify(parseApiError(error, "Не удалось сохранить"), "error");
@@ -642,8 +836,6 @@ async function submitCatalogBook(e, rerender) {
     await fetchCatalogTotal();
     state.editingCatalogId = null;
     state.coverDraftCatalog = "";
-    e.currentTarget.reset();
-    updateCatalogPreview();
     rerender();
   } catch (error) {
     if (isUnauthorizedError(error)) return handleUnauthorized(rerender, null);
@@ -696,6 +888,7 @@ function updateCatalogPreview() {
 function setupCustomSelect(id, onChange) {
   const root = document.querySelector(`[data-custom-select="${id}"]`);
   if (!root) return;
+  customSelectHandlers.set(id, onChange);
   const trigger = root.querySelector("[data-select-trigger]");
   const menu = root.querySelector("[data-select-menu]");
   trigger?.addEventListener("click", () => {
@@ -703,6 +896,7 @@ function setupCustomSelect(id, onChange) {
       if (item !== root) item.classList.remove("open");
     });
     root.classList.toggle("open");
+    if (root.classList.contains("open")) syncCustomSelectKbHighlight(root);
   });
   menu?.addEventListener("click", (event) => {
     const option = event.target.closest("[data-select-option]");
@@ -737,6 +931,8 @@ function setupComboSelect(id) {
   const hidden = document.querySelector(`#${id}`);
   if (!input || !menu || !hidden) return;
 
+  let kbNavUsed = false;
+
   const open = () => root.classList.add("open");
   const close = () => root.classList.remove("open");
 
@@ -754,6 +950,7 @@ function setupComboSelect(id) {
       const match = !q || val.startsWith(q) || val.includes(q);
       btn.style.display = match ? "" : "none";
     });
+    syncComboKbHighlight(menu);
   };
 
   trigger?.addEventListener("click", () => {
@@ -767,6 +964,7 @@ function setupComboSelect(id) {
   });
 
   input.addEventListener("input", () => {
+    kbNavUsed = false;
     open();
     filter();
     hidden.value = String(input.value || "");
@@ -774,9 +972,35 @@ function setupComboSelect(id) {
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") return close();
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (!root.classList.contains("open")) return;
+      kbNavUsed = true;
+      const opts = visibleMenuOptions(menu, "[data-combo-option]");
+      if (!opts.length) return;
+      e.preventDefault();
+      let activeIdx = opts.findIndex((o) => o.classList.contains("is-kb-active"));
+      if (e.key === "ArrowDown") {
+        if (activeIdx < 0) activeIdx = 0;
+        else activeIdx = Math.min(opts.length - 1, activeIdx + 1);
+      } else {
+        if (activeIdx < 0) activeIdx = opts.length - 1;
+        else activeIdx = Math.max(0, activeIdx - 1);
+      }
+      opts.forEach((o) => o.classList.remove("is-kb-active"));
+      opts[activeIdx].classList.add("is-kb-active");
+      opts[activeIdx].scrollIntoView({ block: "nearest" });
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
-      applyValue(String(input.value || "").trim());
+      const typed = String(input.value || "").trim();
+      if (kbNavUsed && root.classList.contains("open")) {
+        const opts = visibleMenuOptions(menu, "[data-combo-option]");
+        const active = opts.find((o) => o.classList.contains("is-kb-active"));
+        kbNavUsed = false;
+        if (active) applyValue(String(active.dataset.value || "").trim());
+        else applyValue(typed);
+      } else applyValue(typed);
     }
   });
 

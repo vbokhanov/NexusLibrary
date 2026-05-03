@@ -2,14 +2,77 @@
 import { ROLE_LABELS, canEditThisBook, canDeleteThisBook, canManageCatalog, state } from "../core/state";
 import { bookTextUrl } from "../api/http";
 
+const MAX_TOASTS = 3;
+const TOAST_TTL_MS = 4200;
+
+function ensureToastHost() {
+  let host = document.querySelector("#toastHost");
+  if (host) return host;
+  host = document.createElement("div");
+  host.id = "toastHost";
+  host.className = "toast-host";
+  host.setAttribute("aria-live", "polite");
+  document.body.appendChild(host);
+  return host;
+}
+
+function clearToastTimer(node) {
+  if (node?._toastTimer) {
+    window.clearTimeout(node._toastTimer);
+    node._toastTimer = null;
+  }
+}
+
+function removeToastNode(node) {
+  if (!node?.parentNode) return;
+  clearToastTimer(node);
+  node.classList.remove("toast-in");
+  node.classList.add("toast-out");
+  const done = () => {
+    node.removeEventListener("transitionend", done);
+    node.remove();
+  };
+  node.addEventListener("transitionend", done, { once: true });
+  window.setTimeout(() => {
+    if (node.parentNode) node.remove();
+  }, 320);
+}
+
 export function notify(message, kind = "info") {
-  const holder = document.querySelector("#alerts");
-  if (!holder) return;
+  const host = ensureToastHost();
   const node = document.createElement("div");
-  node.className = `alert ${kind}`;
+  node.className = `toast-item alert ${kind}`;
+  node.setAttribute("role", "status");
   node.textContent = message;
-  holder.appendChild(node);
-  setTimeout(() => node.remove(), 4200);
+
+  const arm = (el) => {
+    el._toastTimer = window.setTimeout(() => removeToastNode(el), TOAST_TTL_MS);
+  };
+
+  const mount = () => {
+    host.appendChild(node);
+    requestAnimationFrame(() => node.classList.add("toast-in"));
+    arm(node);
+  };
+
+  if (host.children.length >= MAX_TOASTS) {
+    const oldest = host.firstElementChild;
+    if (!oldest) mount();
+    else {
+      clearToastTimer(oldest);
+      let settled = false;
+      const finishEvict = () => {
+        if (settled) return;
+        settled = true;
+        oldest.remove();
+        mount();
+      };
+      oldest.classList.remove("toast-in");
+      oldest.classList.add("toast-out");
+      oldest.addEventListener("transitionend", finishEvict, { once: true });
+      window.setTimeout(finishEvict, 280);
+    }
+  } else mount();
 }
 
 export function renderLayout(app, page) {
@@ -33,7 +96,6 @@ export function renderLayout(app, page) {
             ${authed ? `<button id="logout" class="danger">Выйти</button>` : ""}
           </div>
         </header>
-        <section id="alerts" class="alerts"></section>
         ${renderPage(page)}
         ${renderFooter(page)}
       </div>
@@ -61,7 +123,6 @@ function renderFooter(page) {
       </div>
       <div class="footer-meta">
         <span>© ${year} Курсовой проект</span>
-        <span>Backend: Express + Prisma • Frontend: Vite</span>
       </div>
     </div>
   </footer>`;
@@ -330,11 +391,11 @@ function registerForm() {
 }
 
 function personalBookForm() {
-  return `<h4>${state.editingId ? "Редактировать мою книгу" : "Добавить свою книгу"}</h4>
+  return `<h4 id="personalFormHeading">${state.editingId ? "Редактировать мою книгу" : "Добавить свою книгу"}</h4>
   <form id="personalBookForm">
     <input name="title" placeholder="Название" required />
     <input name="author" placeholder="Автор" required />
-    <input name="year" type="number" min="1800" max="${new Date().getFullYear()}" placeholder="Год" required />
+    <input name="year" class="input-year" type="number" min="500" max="${new Date().getFullYear()}" placeholder="Год" required />
     <input type="hidden" name="genre" id="personalGenre" value="" />
     ${comboSelect(
       "personalGenre",
@@ -364,7 +425,7 @@ function personalBookForm() {
     <div id="personalCoverPreview" class="cover-preview ${state.coverDraft ? "has-image" : ""}">
       ${state.coverDraft ? `<img src="${state.coverDraft}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
-    <textarea name="contentText" rows="6" placeholder="Или вставьте текст книги сюда (до ~250 тыс. символов)"></textarea>
+    <textarea name="contentText" rows="6" placeholder="Вставьте текст книги сюда (до ~250 тыс. символов)"></textarea>
     <div class="inline-actions">
       <button type="submit">${state.editingId ? "Сохранить" : "Добавить"}</button>
       <button type="button" id="cancelPersonalEdit" class="secondary">Сбросить</button>
@@ -393,7 +454,7 @@ function catalogBookForm() {
     <input name="title" placeholder="Название" required />
     <input name="author" placeholder="Автор" required />
     <input name="isbn" placeholder="ISBN" required />
-    <input name="year" type="number" min="1800" max="${new Date().getFullYear()}" required />
+    <input name="year" class="input-year" type="number" min="1800" max="${new Date().getFullYear()}" required />
     <input name="genre" placeholder="Жанр" required />
     <input name="coverUrl" type="url" placeholder="Ссылка на обложку (https://...)" />
     <label class="file-label">
@@ -404,7 +465,7 @@ function catalogBookForm() {
       ${state.coverDraftCatalog ? `<img src="${state.coverDraftCatalog}" alt="Предпросмотр" />` : "<span>Предпросмотр обложки</span>"}
     </div>
     <input name="textUrl" type="url" placeholder="Ссылка на полный текст (.txt), необязательно" />
-    <textarea name="contentText" rows="4" placeholder="Или фрагмент/полный текст в каталоге"></textarea>
+    <textarea name="contentText" rows="4" placeholder="Фрагмент или полный текст в каталоге"></textarea>
     <div class="inline-actions">
       <button type="submit">${state.editingCatalogId ? "Сохранить в фонде" : "Добавить в фонд"}</button>
       <button type="button" id="cancelCatalogEdit" class="secondary">Сбросить</button>
@@ -470,17 +531,23 @@ export function renderCatalogGrid() {
   list.innerHTML = state.catalogItems.map((b) => buildBookCard(b, "catalog")).join("");
 }
 
-export function renderPersonalLists() {
+export function renderPersonalFavoritesListOnly() {
   const fav = document.querySelector("#favoriteList");
+  if (!fav) return;
+  if (!state.favoriteBooks.length) fav.innerHTML = `<p class="empty">Пока пусто — добавьте книги в избранное в каталоге.</p>`;
+  else fav.innerHTML = state.favoriteBooks.map((b) => buildBookCard(b, "favorites")).join("");
+}
+
+export function renderPersonalMyBooksListOnly() {
   const mine = document.querySelector("#myBookList");
-  if (fav) {
-    if (!state.favoriteBooks.length) fav.innerHTML = `<p class="empty">Пока пусто — добавьте книги в избранное в каталоге.</p>`;
-    else fav.innerHTML = state.favoriteBooks.map((b) => buildBookCard(b, "favorites")).join("");
-  }
-  if (mine) {
-    if (!state.myBooks.length) mine.innerHTML = `<p class="empty">Вы ещё не добавляли свои книги.</p>`;
-    else mine.innerHTML = state.myBooks.map((b) => buildBookCard(b, "mine")).join("");
-  }
+  if (!mine) return;
+  if (!state.myBooks.length) mine.innerHTML = `<p class="empty">Вы ещё не добавляли свои книги.</p>`;
+  else mine.innerHTML = state.myBooks.map((b) => buildBookCard(b, "mine")).join("");
+}
+
+export function renderPersonalLists() {
+  renderPersonalFavoritesListOnly();
+  renderPersonalMyBooksListOnly();
 }
 
 export function syncReadModal() {
