@@ -22,30 +22,22 @@ Vite 5 + TypeScript · Express 5 + Prisma 6 + Zod 4 · PostgreSQL 16 · JWT · D
 
 **URL при запуске через Compose:** API `http://localhost:4000/api` · SPA **http://localhost:5173** (nginx в контейнере `library-frontend`).
 
-## Файл `backend/.env` и раздел «Перед первым docker compose»
-
-**Зачем вообще `.env`:** бэкенду для работы нужны как минимум строка подключения к БД (**`DATABASE_URL`**) и секрет для подписи токенов (**`JWT_SECRET`**). Они не хранятся в репозитории в открытом виде; шаблон значений лежит в **`backend/.env.example`**, рабочая копия — в **`backend/.env`** (файл обычно в `.gitignore`).
-
-**Когда нужен именно шаг «скопировать `.env.example` → `.env`»:**
-
-- Если вы поднимаете проект через **`docker compose`**: в `docker-compose.yml` у сервиса `backend` указано **`env_file: ./backend/.env`**. Без этого файла (или с пустым/чужим содержимым) контейнер API не получит корректные переменные — миграции, Prisma и JWT не заведутся как задумано. Для Compose в **`DATABASE_URL`** хост БД должен быть **`db`** (имя сервиса Postgres в той же сети), логин/пароль/имя БД — как в `docker-compose.yml`: `library_user` / `library_pass` / `library_db`. **`JWT_SECRET`** замените на свою длинную случайную строку (в примере стоит заглушка `CHANGE_ME_FOR_PRODUCTION`).
-
-**Почему вы могли «этого не делать» и при этом всё работало:**
-
-- Запускали **без Docker** (раздел «Без Docker»): тогда вы всё равно создавали **`backend/.env` вручную** или копировали example один раз раньше — просто не по инструкции из заголовка «Перед первым docker compose».
-- Файл **`.env` уже существовал** у вас локально (скопирован с другой машины, не удалялся между ветками и т.д.).
-- Пользовались только **тестами** (`npm test` в `backend`/`frontend`): там Prisma и API **мокируются**, поднятая Postgres для Docker не обязательна — к шагу с `.env` для Compose это не привязывается.
-
-Итого: блок **«Перед первым `docker compose`»** — это чеклист для тех, кто **впервые** поднимает стек в Docker; если вы не используете Compose или `.env` у вас уже настроен, формально «копировать example» повторно не требуется.
-
 ## Перед первым `docker compose`
 
-1. Скопировать `backend/.env.example` → `backend/.env`.
-2. В **`DATABASE_URL`** для Compose хост БД — **`db`**, пользователь / пароль / имя БД как в `docker-compose.yml` (`library_user` / `library_pass` / `library_db`). В примере из `.env.example` это уже так.
-3. Задать свой **`JWT_SECRET`** (не оставлять заглушку для реального деплоя).
-4. При необходимости поправить **`CORS_ORIGIN`** под ваши URL фронта (в примере указаны localhost).
+Скопировать `backend/.env.example` → `backend/.env` (в Compose для backend указан `env_file: ./backend/.env`). В example уже заданы значения для локального запуска (`DATABASE_URL` с хостом `db` и учётными данными из `docker-compose.yml`).
 
-## Docker: поднять → сид → наполнить каталог → логи
+## Быстрый запуск
+
+Из корня репозитория (Git Bash / WSL / macOS / Linux):
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build -d
+docker compose exec backend npm run prisma:seed
+docker compose exec backend npm run prisma:import:gutendex -- 100
+```
+
+## Подробный запуск
 
 Все команды из **корня репозитория** (где `docker-compose.yml`).
 
@@ -119,19 +111,11 @@ docker compose down -v
 
 ## Тесты
 
-В **Docker-образе backend нет папки `tests/`**, поэтому Jest, Vitest и Playwright запускаются **на машине разработчика**, не через `docker compose exec`. Нужны `npm install` в `backend/` и `frontend/`.
-
-Если приглашение терминала уже показывает `...\frontend>`, **не** набирайте снова `cd frontend` (получится несуществующая вложенная папка). Строки ниже с префиксом `cd … &&` рассчитаны на запуск **из корня** репозитория (где лежат каталоги `backend` и `frontend`). Цепочки `&&` работают в **Git Bash**, **WSL**, **PowerShell 7+**; в **Windows PowerShell 5.1** выполняйте команды по одной строке.
+Jest, Vitest и Playwright запускаются **на машине разработчика** (в Docker-образ backend тесты не копируются). Нужен `npm install` в `backend/` и `frontend/`. Команды с префиксом `cd … &&` — из **корня** репозитория.
 
 ### Все команды тестов
 
-**Один раз (Playwright, из `frontend`):**
-
-```bash
-npm run playwright:install
-```
-
-или `npx playwright install chromium`. Если Chromium уже скачан в `%LOCALAPPDATA%\ms-playwright\`, вывода почти не будет — это нормально; проверка: `npm run test:e2e`.
+**Один раз (Playwright, из `frontend`):** `npm run playwright:install` или `npx playwright install chromium`.
 
 **Backend (`backend/`):**
 
@@ -276,14 +260,4 @@ cd backend && npm test && npm run test:coverage
 
 `test:api`, `test:unit` и `test:fuzz` — **части** того же набора, что уже входит в `npm test`; их запускают отдельно, когда нужен узкий прогон.
 
-### Вывод в терминале (чтобы не путать с ошибками)
-
-**Backend (Jest):** при `npm test` / `npm run test:coverage` лог HTTP (`GET /api/…`) и `console.error` из кода **по умолчанию скрыты** (`silent: true` в `jest.config.js`, без `morgan` в `NODE_ENV=test`). Итог — только строки `Test Suites` / `Tests` и таблица coverage. Если нужна полная болтовня в консоли для отладки — временно поставьте **`silent: false`** в `backend/jest.config.js`.
-
-**Frontend (Vitest):** строки **`Waiting for file changes…`** и **`No test files found`** — это не падение тестов. Так бывает, если запущен **режим наблюдения** (`npm run test:watch` или `vitest` без `run`) и в фильтре имён файлов (**клавиша `p`**) случайно оказался мусор (например кусок `npm run test:coverage`) — тогда шаблон не совпадает ни с одним `*.test.ts`. Нажмите **`q`**, запустите снова **`npm test`** (один прогон, процесс завершится сам). **`PASS`** в этой строке означает «последний прогон был успешным», а не новый запуск.
-
-**Postman:** импорт `postman/*.json` — бьёт в **живой** API; автопроверки только у Health и Login (см. коллекцию).
-
-## Документация курсового
-
-`docs/domain-analysis.md`, `docs/uml-architecture.puml`, `docs/fuzzing-report-template.md`, `docs/cloud-deploy-template.md`.
+**Postman:** импорт `postman/*.json` — сделан для ручной проверки API
