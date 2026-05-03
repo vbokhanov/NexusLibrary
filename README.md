@@ -31,7 +31,7 @@ Vite 5 + TypeScript · Express 5 + Prisma 6 + Zod 4 · PostgreSQL 16 · JWT · D
 Из корня репозитория (после этого проект будет запущен на http://localhost:5173):
 
 ```bash
-copy backend/.env.example backend/.env
+copy backend\.env.example backend\.env
 docker compose up --build -d
 docker compose exec backend npm run prisma:seed
 docker compose exec backend npm run prisma:import:gutendex -- 100
