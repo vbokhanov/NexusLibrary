@@ -27,10 +27,12 @@ async function ensureBootstrapAdmin() {
       banned = false,
       "updatedAt" = NOW()
   `;
-  // eslint-disable-next-line no-console
-  console.log(
-    `[bootstrap] Служебный админ: id=1, email=${BOOTSTRAP_ADMIN_EMAIL}, пароль=${BOOTSTRAP_ADMIN_PASSWORD}`
-  );
+  if (process.env.NODE_ENV !== "test") {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[bootstrap] Служебный админ: id=1, email=${BOOTSTRAP_ADMIN_EMAIL}, пароль=${BOOTSTRAP_ADMIN_PASSWORD}`
+    );
+  }
 }
 
 module.exports = { ensureBootstrapAdmin, BOOTSTRAP_ADMIN_EMAIL, BOOTSTRAP_ADMIN_PASSWORD };

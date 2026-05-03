@@ -17,7 +17,9 @@ app.use(
   })
 );
 app.use(express.json({ limit: "16mb" }));
-app.use(morgan("dev"));
+if (process.env.NODE_ENV !== "test") {
+  app.use(morgan("dev"));
+}
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", service: "library-backend" });

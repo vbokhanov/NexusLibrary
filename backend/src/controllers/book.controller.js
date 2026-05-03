@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { catalogBookSchema, personalBookSchema } = require("../validators/book.validator");
+const { catalogWhereFromQuery, orderByFromSort } = require("../utils/catalogBookQuery");
 
 const MAX_TEXT_FETCH_BYTES = 4 * 1024 * 1024;
 /** Внешние зеркала (Gutenberg и т.д.) в приватных окнах / медленных сетях часто не укладываются в 4–5 с. */
@@ -7,32 +8,9 @@ const REMOTE_TEXT_TIMEOUT_MS = 28000;
 const MAX_COVER_FETCH_BYTES = 3 * 1024 * 1024;
 const REMOTE_COVER_TIMEOUT_MS = 20000;
 
-function catalogWhereFromQuery(req) {
-  const q = String(req.query.q || "").trim();
-  const genre = String(req.query.genre || "").trim();
-  const base = { ownerUserId: null };
-  const search = q
-    ? {
-        OR: [
-          { title: { contains: q, mode: "insensitive" } },
-          { author: { contains: q, mode: "insensitive" } },
-          { genre: { contains: q, mode: "insensitive" } }
-        ]
-      }
-    : {};
-  const genreFilter = genre && genre !== "all" ? { genre } : {};
-  return { ...base, ...search, ...genreFilter };
-}
-
-function orderByFromSort(sort) {
-  if (sort === "oldest") return [{ year: "asc" }, { id: "asc" }];
-  if (sort === "title") return [{ title: "asc" }, { id: "asc" }];
-  return [{ id: "desc" }];
-}
-
 async function listBooks(req, res, next) {
   try {
-    const where = catalogWhereFromQuery(req);
+    const where = catalogWhereFromQuery(req.query);
     const sort = String(req.query.sort || "newest");
     const take = Math.min(60, Math.max(1, Number(req.query.take) || 24));
     const skip = Math.max(0, Number(req.query.skip) || 0);

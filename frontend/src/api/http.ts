@@ -40,8 +40,8 @@ async function doFetch(endpoint: string, options: RequestInit, token: string) {
 export async function apiRequest(endpoint: string, options: RequestInit, token = "") {
   const method = requestMethodUpper(options);
   const maxAttempts = shouldRetryTransientOnMethod(method) ? 3 : 1;
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  let attempt = 0;
+  while (attempt < maxAttempts) {
     try {
       const response = await doFetch(endpoint, options, token);
 
@@ -56,15 +56,14 @@ export async function apiRequest(endpoint: string, options: RequestInit, token =
       if (response.status === 204) return null;
       return response.json();
     } catch (e) {
-      lastErr = e;
       if (attempt < maxAttempts - 1 && isTransientNetworkFailure(e)) {
         await sleep(280 * (attempt + 1));
+        attempt++;
         continue;
       }
       throw e;
     }
   }
-  throw lastErr;
 }
 
 export function bookTextUrl(bookId: number, download: boolean) {
@@ -78,15 +77,16 @@ export function bookCoverUrl(bookId: number) {
 
 export async function fetchBookPlainText(bookId: number) {
   const url = bookTextUrl(bookId, false);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let attempt = 0;
+  while (attempt < 2) {
     const response = await fetch(url);
     if (response.ok) return response.text();
     const text = await response.text();
     if (response.status === 504 && attempt === 0) {
       await sleep(900);
+      attempt++;
       continue;
     }
     throw new Error(text || "Не удалось загрузить текст");
   }
-  throw new Error("Не удалось загрузить текст");
 }

@@ -1,0 +1,284 @@
+{
+  "info": {
+    "_postman_id": "a7f3c2b1-4e5d-6f7a-8b9c-0d1e2f3a4b5c",
+    "name": "Library Nexus API",
+    "description": "Коллекция REST API проекта Library Nexus.\n\n**Импорт в Postman:** File → Import → выберите этот JSON.\n\n**Переменные коллекции** (вкладка Variables у коллекции):\n- `baseUrl` — базовый URL API, по умолчанию `http://localhost:4000/api`\n- `accessToken` — JWT после успешного Login (можно вставить вручную или выполнить запрос Login и скопировать `token` из ответа)\n\n**Роли:** публичные GET каталога без токена. `/books/mine`, смена пароля — с Bearer. `/users/*` — только ADMIN. Создание книги в каталоге POST `/books` — ADMIN или LIBRARIAN.\n\nСлужебный админ после старта backend: `admin@nexus.local` / `NexusAdmin2026!` (см. README).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000/api" },
+    { "key": "accessToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "01 — Health",
+      "item": [
+        {
+          "name": "GET Health (проверка API)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health",
+            "description": "Должен вернуть JSON `{ \"status\": \"ok\", ... }`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Body has status ok', function () { var j = pm.response.json(); pm.expect(j.status).to.eql('ok'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — Auth",
+      "item": [
+        {
+          "name": "POST Login (получить JWT)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@nexus.local\",\n  \"password\": \"NexusAdmin2026!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "description": "Подставьте свой email/пароль. В ответе поле `token` — вставьте в переменную коллекции `accessToken` для следующих запросов."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 or 401', function () { pm.expect([200,401]).to.include(pm.response.code); });",
+                  "try { var j = pm.response.json(); if (j.token) { pm.collectionVariables.set('accessToken', j.token); } } catch (e) {}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Register READER",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Тест Пользователь\",\n  \"email\": \"reader_demo@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"READER\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register",
+            "description": "Измените email, если уже занят (409)."
+          }
+        },
+        {
+          "name": "POST Change password (нужен Bearer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"NexusAdmin2026!\",\n  \"newPassword\": \"NewPassword9!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/change-password",
+            "description": "Внимание: реально сменит пароль у аккаунта. Для демо лучше не вызывать на продовом админе."
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 — Books (публично)",
+      "item": [
+        {
+          "name": "GET Список каталога",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/books?take=24&skip=0&sort=newest&q=&genre=all",
+            "description": "Пагинация: take, skip; сортировка newest|oldest|title; поиск q; жанр genre или all."
+          }
+        },
+        {
+          "name": "GET Число книг в каталоге",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/books/meta/count"
+          }
+        },
+        {
+          "name": "GET Список жанров",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/books/meta/genres"
+          }
+        },
+        {
+          "name": "GET Книга по id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/books/1",
+            "description": "Замените id на существующий в вашей БД."
+          }
+        },
+        {
+          "name": "GET Текст книги (plain)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/books/1/text",
+            "description": "Текст/plain. Если нет contentText и нет textUrl — 404."
+          }
+        },
+        {
+          "name": "GET Скачать текст (?download=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/books/1/text?download=1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 — Books (с токеном)",
+      "item": [
+        {
+          "name": "GET Мои книги",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/books/mine"
+          }
+        },
+        {
+          "name": "GET Избранное batch (ids через запятую)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/books/favorites/batch?ids=1,2"
+          }
+        },
+        {
+          "name": "POST Личная книга",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Моя заметка\",\n  \"author\": \"Я\",\n  \"year\": 2024,\n  \"genre\": \"Эссе\",\n  \"description\": \"Кратко\"\n}"
+            },
+            "url": "{{baseUrl}}/books/personal",
+            "description": "ISBN генерируется на сервере."
+          }
+        },
+        {
+          "name": "POST Книга в общий каталог (LIBRARIAN/ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Уникальное название из Postman\",\n  \"author\": \"Автор\",\n  \"isbn\": \"9780000000999\",\n  \"year\": 2001,\n  \"genre\": \"Тест\",\n  \"inStock\": 1,\n  \"contentText\": \"Короткий текст для демо.\"\n}"
+            },
+            "url": "{{baseUrl}}/books",
+            "description": "Нужна роль LIBRARIAN или ADMIN. ISBN и title должны быть уникальны в рамках правил API."
+          }
+        },
+        {
+          "name": "PATCH Книга по id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Новое название\"\n}"
+            },
+            "url": "{{baseUrl}}/books/1",
+            "description": "Владелец личной книги или каталог для ролей фонда."
+          }
+        },
+        {
+          "name": "DELETE Книга по id",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/books/1",
+            "description": "Осторожно: удаляет запись."
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 — Users (только ADMIN)",
+      "item": [
+        {
+          "name": "GET Список пользователей (пагинация)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/users?page=1&limit=12&q=",
+            "description": "Только ADMIN. Параметры page, limit, q."
+          }
+        },
+        {
+          "name": "GET Пользователь по id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/users/1"
+          }
+        },
+        {
+          "name": "POST Код библиотекаря (10 цифр)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/users/librarian-codes",
+            "description": "Создаёт одноразовый код; ответ содержит поле code."
+          }
+        },
+        {
+          "name": "PATCH Пользователь",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Имя Фамилия\",\n  \"email\": \"user2@example.com\"\n}"
+            },
+            "url": "{{baseUrl}}/users/2",
+            "description": "Не меняйте произвольно id=1 (служебный админ)."
+          }
+        }
+      ]
+    }
+  ]
+}

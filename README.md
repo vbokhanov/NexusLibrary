@@ -1,145 +1,289 @@
-# Library Nexus - Курсовой проект
+# Library Nexus
 
-Клиент-серверное приложение для электронной библиотеки: общий каталог, личная библиотека пользователя, чтение книг в браузере и скачивание текстов.
+## О проекте
+
+**Library Nexus** — учебный полнофункциональный веб-сервис электронной библиотеки: отдельный **REST API** на Node.js и **одностраничное приложение (SPA)** в браузере. Данные хранятся в **PostgreSQL**; доступ к API для залогиненных пользователей по **JWT**.
+
+**С точки зрения пользователя сервис позволяет:**
+
+- Просматривать **общий каталог** книг с поиском, фильтром по жанру, сортировкой и подгрузкой при прокрутке.
+- **Регистрироваться и входить** под ролью **читатель** или **библиотекарь** (для библиотекаря может потребоваться код приглашения).
+- Вести **личную библиотеку**: свои загруженные книги, **избранное** из общего каталога, публикация в общий фонд (для ролей с правами).
+- **Читать текст** книги в модальном окне в браузере и **скачивать** его в виде `.txt`; смотреть **обложки** (в т.ч. по URL или data URI).
+- Администратору — **управление пользователями** и служебными сущностями (в рамках заложенной в проект модели прав).
+
+**С точки зрения архитектуры:** фронтенд обращается к бэкенду по HTTP; бэкенд валидирует входные данные (**Zod**), работает с БД через **Prisma**, выдаёт JSON и потоки для текстов/обложек. Служебный администратор с фиксированным `id=1` создаётся при старте API (**bootstrap**), чтобы система всегда была управляема после чистой установки.
+
+Импорт демонстрационного наполнения каталога выполняется **скриптами** (Gutendex / Open Library) — это не часть UI, а отдельные команды после поднятия БД и сида.
 
 ## Стек
-- **Frontend:** Vite + TypeScript + адаптивный CSS
-- **Backend:** Node.js + Express + Prisma + JWT + Zod
-- **DB:** PostgreSQL
-- **Тесты:** Jest + Supertest + Fast-check (фаззинг)
-- **DevOps:** Docker, docker-compose
 
-## Структура проекта
-```text
-.
-├── backend/
-│   ├── src/              # API, middleware, controllers, validators
-│   ├── prisma/           # schema + seed
-│   ├── tests/            # integration + fuzz tests
-│   └── Dockerfile
-├── frontend/
-│   ├── src/              # UI + API client
-│   └── Dockerfile
-├── docs/                 # анализ, UML, шаблоны отчётов
-├── docker-compose.yml
-└── README.md
+Vite 5 + TypeScript · Express 5 + Prisma 6 + Zod 4 · PostgreSQL 16 · JWT · Docker Compose.
+
+**URL при запуске через Compose:** API `http://localhost:4000/api` · SPA **http://localhost:5173** (nginx в контейнере `library-frontend`).
+
+## Файл `backend/.env` и раздел «Перед первым docker compose»
+
+**Зачем вообще `.env`:** бэкенду для работы нужны как минимум строка подключения к БД (**`DATABASE_URL`**) и секрет для подписи токенов (**`JWT_SECRET`**). Они не хранятся в репозитории в открытом виде; шаблон значений лежит в **`backend/.env.example`**, рабочая копия — в **`backend/.env`** (файл обычно в `.gitignore`).
+
+**Когда нужен именно шаг «скопировать `.env.example` → `.env`»:**
+
+- Если вы поднимаете проект через **`docker compose`**: в `docker-compose.yml` у сервиса `backend` указано **`env_file: ./backend/.env`**. Без этого файла (или с пустым/чужим содержимым) контейнер API не получит корректные переменные — миграции, Prisma и JWT не заведутся как задумано. Для Compose в **`DATABASE_URL`** хост БД должен быть **`db`** (имя сервиса Postgres в той же сети), логин/пароль/имя БД — как в `docker-compose.yml`: `library_user` / `library_pass` / `library_db`. **`JWT_SECRET`** замените на свою длинную случайную строку (в примере стоит заглушка `CHANGE_ME_FOR_PRODUCTION`).
+
+**Почему вы могли «этого не делать» и при этом всё работало:**
+
+- Запускали **без Docker** (раздел «Без Docker»): тогда вы всё равно создавали **`backend/.env` вручную** или копировали example один раз раньше — просто не по инструкции из заголовка «Перед первым docker compose».
+- Файл **`.env` уже существовал** у вас локально (скопирован с другой машины, не удалялся между ветками и т.д.).
+- Пользовались только **тестами** (`npm test` в `backend`/`frontend`): там Prisma и API **мокируются**, поднятая Postgres для Docker не обязательна — к шагу с `.env` для Compose это не привязывается.
+
+Итого: блок **«Перед первым `docker compose`»** — это чеклист для тех, кто **впервые** поднимает стек в Docker; если вы не используете Compose или `.env` у вас уже настроен, формально «копировать example» повторно не требуется.
+
+## Перед первым `docker compose`
+
+1. Скопировать `backend/.env.example` → `backend/.env`.
+2. В **`DATABASE_URL`** для Compose хост БД — **`db`**, пользователь / пароль / имя БД как в `docker-compose.yml` (`library_user` / `library_pass` / `library_db`). В примере из `.env.example` это уже так.
+3. Задать свой **`JWT_SECRET`** (не оставлять заглушку для реального деплоя).
+4. При необходимости поправить **`CORS_ORIGIN`** под ваши URL фронта (в примере указаны localhost).
+
+## Docker: поднять → сид → наполнить каталог → логи
+
+Все команды из **корня репозитория** (где `docker-compose.yml`).
+
+```bash
+# Сборка и старт (миграции выполняются при старте backend: start:docker)
+docker compose up --build -d
+
+docker compose ps
+
+# Демо-пользователи (один раз после первого запуска или после полного сброса тома БД)
+docker compose exec backend npm run prisma:seed
+
+# Импорт книг в ОБЩИЙ каталог (число — цель по строкам, фактически может быть меньше)
+docker compose exec backend npm run prisma:import:gutendex -- 200
+
+# Альтернатива: Open Library (число — цель; скрипт может создать admin@library.local — не путать с admin@nexus.local)
+docker compose exec backend npm run prisma:import:real -- 100
+
+# Логи API
+docker compose logs -f backend
+
+# Перезапуск только API после смены .env
+docker compose restart backend
 ```
 
-## Функциональность
-- Регистрация/вход, JWT-аутентификация, сохранение сессии после перезагрузки страницы
-- Роли: `ADMIN`, `LIBRARIAN`, `READER`
-- Общий каталог книг с поиском, фильтрами, сортировкой и бесконечной прокруткой
-- Личная библиотека (доступна только после входа):
-  - мои книги (добавление/редактирование/удаление владельцем)
-  - избранное из общего каталога
-- Ролевой доступ:
-  - `READER` и `GUEST`: просмотр каталога, чтение, избранное
-  - `LIBRARIAN`/`ADMIN`: управление общим каталогом
-- Чтение книги в браузере (`/api/books/:id/text`) и скачивание `.txt`
-- Импорт 1000+ реальных электронных книг (Gutendex / Project Gutenberg)
-- Seed демо-данных и демо-текстов книг
-- Интеграционные тесты + fuzz тест для auth-валидации
+## Docker: чистка данных
 
-## Быстрый старт (Docker)
-1. Создайте `backend/.env` на основе `backend/.env.example`.
-2. Поднимите стек:
+**Только книги общего каталога** (`ownerUserId` пустой; связанные `Borrow` удалятся каскадом с книгой):
 
-   - `docker compose up --build -d`
-   - `docker compose up -d`
-   - если меняли Dockerfile/зависимости: `docker compose up --build -d`
+```bash
+docker compose exec -T db psql -U library_user -d library_db -c "DELETE FROM \"Book\" WHERE \"ownerUserId\" IS NULL;"
+```
 
-3. Примените миграции и заполните демо-данные:
-   - `docker compose exec backend npx prisma migrate deploy`
-   - `docker compose exec backend npm run prisma:seed`
-4. (Опционально) Импортируйте 1000+ книг с реальными текстами:
-   - `docker compose exec backend npm run prisma:import:gutendex -- 1200`
-5. Откройте:
-   - frontend: `http://localhost:5173`
-   - backend health: `http://localhost:4000/api/health`
+**Все книги** (займы удалятся каскадом с книгами):
 
-## Быстрый старт (локально без Docker frontend)
-1. Установите зависимости:
-   - `cd backend && npm install`
-   - `cd ../frontend && npm install`
-2. Поднимите postgres (например, Docker) и настройте `DATABASE_URL` в `backend/.env`.
-3. Примените миграции и seed:
-   - `cd backend && npx prisma migrate deploy`
-   - `npm run prisma:seed`
-4. Запустите backend и frontend:
-   - `npm run dev` (в `backend`)
-   - `npm run dev` (в `frontend`)
+```bash
+docker compose exec -T db psql -U library_user -d library_db -c "DELETE FROM \"Book\";"
+```
+
+**Одноразовые коды библиотекарей** (если забили таблицу тестами):
+
+```bash
+docker compose exec -T db psql -U library_user -d library_db -c "DELETE FROM \"LibrarianInviteCode\";"
+```
+
+**Полный сброс схемы под миграции** (пустые таблицы; потом снова сид):
+
+```bash
+docker compose exec backend npx prisma migrate reset --force
+docker compose exec backend npm run prisma:seed
+```
+
+**Стоп контейнеров / стоп + удалить том Postgres (всё как с нуля):**
+
+```bash
+docker compose down
+docker compose down -v
+```
+
+## Входы
+
+| Кто | Email | Пароль |
+|-----|-------|--------|
+| Служебный админ `id=1` (bootstrap при старте API) | `admin@nexus.local` | `NexusAdmin2026!` |
+| После `prisma:seed` | `librarian@library.local` | `Librarian123!` |
+| После `prisma:seed` | `reader@library.local` | `Reader123!` |
+
+## Без Docker (локально)
+
+Нужны Node 20+ и свой Postgres. Порядок: `cd backend` → `npm install` → в `.env` свой `DATABASE_URL` → `npx prisma migrate deploy` → `npm run prisma:seed` → `npm run dev` · второй терминал: `cd frontend` → `npm install` → `npm run dev`. Импорт книг: `npm run prisma:import:gutendex -- 100` (из каталога `backend`).
 
 ## Тесты
-- Интеграция: `cd backend && npm test`
-- Фаззинг: `cd backend && npm run test:fuzz`
 
-## Команды для проверки исправлений
+В **Docker-образе backend нет папки `tests/`**, поэтому Jest, Vitest и Playwright запускаются **на машине разработчика**, не через `docker compose exec`. Нужны `npm install` в `backend/` и `frontend/`.
 
-### 1) Проверка авторизации и регистрации
+Если приглашение терминала уже показывает `...\frontend>`, **не** набирайте снова `cd frontend` (получится несуществующая вложенная папка). Строки ниже с префиксом `cd … &&` рассчитаны на запуск **из корня** репозитория (где лежат каталоги `backend` и `frontend`). Цепочки `&&` работают в **Git Bash**, **WSL**, **PowerShell 7+**; в **Windows PowerShell 5.1** выполняйте команды по одной строке.
+
+### Все команды тестов
+
+**Один раз (Playwright, из `frontend`):**
+
 ```bash
-# Health-check
-curl http://localhost:4000/api/health
-
-# Регистрация
-curl -X POST http://localhost:4000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d "{\"fullName\":\"Иван Тестов\",\"email\":\"ivan_test@example.com\",\"password\":\"Password123\",\"role\":\"READER\"}"
-
-# Логин
-curl -X POST http://localhost:4000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"ivan_test@example.com\",\"password\":\"Password123\"}"
+npm run playwright:install
 ```
 
-### 2) Проверка каталога с пагинацией
+или `npx playwright install chromium`. Если Chromium уже скачан в `%LOCALAPPDATA%\ms-playwright\`, вывода почти не будет — это нормально; проверка: `npm run test:e2e`.
+
+**Backend (`backend/`):**
+
 ```bash
-curl "http://localhost:4000/api/books?take=24&skip=0&sort=newest&q=&genre=all"
-curl "http://localhost:4000/api/books?take=24&skip=24&sort=newest&q=&genre=all"
-curl "http://localhost:4000/api/books/meta/genres"
+npm test
+npm run test:coverage
+npm run test:api
+npm run test:unit
+npm run test:fuzz
 ```
 
-### 3) Проверка чтения/скачивания книги
-```bash
-# Чтение в браузере / plain text
-curl "http://localhost:4000/api/books/1/text"
+**Frontend (`frontend/`):**
 
-# Скачивание .txt
-curl -OJ "http://localhost:4000/api/books/1/text?download=1"
+```bash
+npm test
+npm run test:watch
+npm run test:coverage
+npm run playwright:install
+npm run test:e2e
 ```
 
-### 4) Проверка личной библиотеки (нужен токен)
-```bash
-# Получите токен из /auth/login и подставьте в TOKEN
-curl "http://localhost:4000/api/books/mine" \
-  -H "Authorization: Bearer TOKEN"
+**Из корня репозитория:**
 
-curl -X POST "http://localhost:4000/api/books/personal" \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"title\":\"Моя книга\",\"author\":\"Я\",\"year\":2025,\"genre\":\"Эссе\",\"contentText\":\"Текст книги\"}"
+```bash
+cd backend && npm test
+cd backend && npm run test:coverage
+cd backend && npm run test:api
+cd backend && npm run test:unit
+cd backend && npm run test:fuzz
+cd frontend && npm test
+cd frontend && npm run test:watch
+cd frontend && npm run test:coverage
+cd frontend && npm run playwright:install
+cd frontend && npm run test:e2e
 ```
 
+**Цепочка «всё подряд»** (корень репозитория; нужен shell с `&&`):
 
-## Если ошибка Docker Hub (TLS handshake timeout)
-- Сообщение вида `failed to fetch oauth token ... TLS handshake timeout` означает сетевую проблему доступа Docker daemon к Docker Hub.
-- Для запуска уже собранного проекта без скачивания образов используйте:
-  - `docker compose up -d`
-- Для проверки, что всё поднялось:
-  - `docker compose ps`
-  - `curl http://localhost:4000/api/health`
+```bash
+cd backend && npm test && cd ..
+cd backend && npm run test:coverage && cd ..
+cd frontend && npm test && cd ..
+cd frontend && npm run test:coverage && cd ..
+cd frontend && npm run test:e2e && cd ..
+```
 
+Команды `test:coverage` снова прогоняют те же тесты с инструментированием — так появляются отчёты в `backend/coverage/` и у Vitest.
 
-## UML и аналитика
-- Анализ предметной области: `docs/domain-analysis.md`
-- UML архитектуры: `docs/uml-architecture.puml`
-- Шаблон отчета фаззинга: `docs/fuzzing-report-template.md`
+**Быстрее, без отчётов покрытия:**
 
-## Docker и облако (места под токены и логи)
-- Шаблон облачного деплоя: `docs/cloud-deploy-template.md`
-- Общие placeholders: `.env.example`
+```bash
+cd backend && npm test && cd ..
+cd frontend && npm test && cd ..
+cd frontend && npm run test:e2e && cd ..
+```
 
-## Данные для демо
-- admin: `admin@library.local` / `Admin123!`
-- librarian: `librarian@library.local` / `Librarian123!`
-- reader: `reader@library.local` / `Reader123!`
+### Только бэкенд — API
 
+Интеграционные HTTP-тесты к приложению Express с **моком Prisma** (`api.integration.test.js`, `api.coverage.integration.test.js`).
+
+Из `backend/`:
+
+```bash
+npm run test:api
+```
+
+Из корня:
+
+```bash
+cd backend && npm run test:api
+```
+
+Полный `npm test` по бэкенду **уже включает** эти API-тесты вместе с unit и fuzz.
+
+### Только фронтенд
+
+Из `frontend/`:
+
+```bash
+npm test
+npm run test:watch
+npm run test:coverage
+npm run playwright:install
+npm run test:e2e
+```
+
+Из корня:
+
+```bash
+cd frontend && npm test
+cd frontend && npm run test:watch
+cd frontend && npm run test:coverage
+cd frontend && npm run playwright:install
+cd frontend && npm run test:e2e
+```
+
+`npm run test:coverage` — Vitest + покрытие: **100%** statements / lines / functions по включённым `src/**/*.ts` (исключены `main.ts`, `ui/render.ts`, `features/events.ts`; сценарии UI дублирует E2E).
+
+### Только фаззинг (property-based, только backend)
+
+Из `backend/`:
+
+```bash
+npm run test:fuzz
+```
+
+Из корня:
+
+```bash
+cd backend && npm run test:fuzz
+```
+
+В `npm test` по бэкенду fuzz **уже входит**; отдельная команда — чтобы гонять только fuzz-файлы.
+
+### Все тесты только для backend (`backend/`)
+
+Выполнять из папки `backend` или с префиксом `cd backend && …` из корня.
+
+| Команда | Что делает |
+|---------|------------|
+| `npm test` | Весь Jest: API (`api.integration`, `api.coverage.integration`), unit, fuzz и остальные `tests/**/*.test.js`. |
+| `npm run test:coverage` | То же полное дерево тестов + отчёт покрытия в `backend/coverage/`. |
+| `npm run test:api` | Только API-интеграция. |
+| `npm run test:unit` | Только unit: валидаторы, `catalogBookQuery`, токены, error middleware, ensureAdmin, auth middleware. |
+| `npm run test:fuzz` | Только fuzz: `fuzz.auth`, `fuzz.register`, `fuzz.book.validator`, `fuzz.catalogQuery`. |
+
+Из корня:
+
+```bash
+cd backend && npm test
+cd backend && npm run test:coverage
+cd backend && npm run test:api
+cd backend && npm run test:unit
+cd backend && npm run test:fuzz
+```
+
+**Подряд весь бэкенд** (полный прогон + coverage):
+
+```bash
+cd backend && npm test && npm run test:coverage
+```
+
+`test:api`, `test:unit` и `test:fuzz` — **части** того же набора, что уже входит в `npm test`; их запускают отдельно, когда нужен узкий прогон.
+
+### Вывод в терминале (чтобы не путать с ошибками)
+
+**Backend (Jest):** при `npm test` / `npm run test:coverage` лог HTTP (`GET /api/…`) и `console.error` из кода **по умолчанию скрыты** (`silent: true` в `jest.config.js`, без `morgan` в `NODE_ENV=test`). Итог — только строки `Test Suites` / `Tests` и таблица coverage. Если нужна полная болтовня в консоли для отладки — временно поставьте **`silent: false`** в `backend/jest.config.js`.
+
+**Frontend (Vitest):** строки **`Waiting for file changes…`** и **`No test files found`** — это не падение тестов. Так бывает, если запущен **режим наблюдения** (`npm run test:watch` или `vitest` без `run`) и в фильтре имён файлов (**клавиша `p`**) случайно оказался мусор (например кусок `npm run test:coverage`) — тогда шаблон не совпадает ни с одним `*.test.ts`. Нажмите **`q`**, запустите снова **`npm test`** (один прогон, процесс завершится сам). **`PASS`** в этой строке означает «последний прогон был успешным», а не новый запуск.
+
+**Postman:** импорт `postman/*.json` — бьёт в **живой** API; автопроверки только у Health и Login (см. коллекцию).
+
+## Документация курсового
+
+`docs/domain-analysis.md`, `docs/uml-architecture.puml`, `docs/fuzzing-report-template.md`, `docs/cloud-deploy-template.md`.

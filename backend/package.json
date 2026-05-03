@@ -12,7 +12,10 @@
     "prisma:import:real": "node prisma/import-openlibrary.js",
     "prisma:import:gutendex": "node prisma/import-gutendex.js",
     "test": "jest --runInBand",
-    "test:fuzz": "jest --runInBand tests/fuzz.auth.test.js"
+    "test:coverage": "jest --runInBand --coverage",
+    "test:fuzz": "jest --runInBand tests/fuzz.auth.test.js tests/fuzz.register.test.js tests/fuzz.book.validator.test.js tests/fuzz.catalogQuery.test.js",
+    "test:api": "jest --runInBand tests/api.integration.test.js tests/api.coverage.integration.test.js",
+    "test:unit": "jest --runInBand tests/validators.unit.test.js tests/catalogBookQuery.unit.test.js tests/tokens.unit.test.js tests/error.middleware.unit.test.js tests/ensureAdmin.unit.test.js tests/middleware.auth.unit.test.js"
   },
   "keywords": [],
   "author": "",
