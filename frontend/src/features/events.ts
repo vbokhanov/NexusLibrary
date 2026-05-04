@@ -697,6 +697,7 @@ async function onCatalogListClick(event) {
   if (action === "edit") {
     state.editingCatalogId = id;
     state.editingId = null;
+    state.personalTab = "publish";
     history.pushState({}, "", "/personal");
     window.dispatchEvent(new PopStateEvent("popstate"));
     return;
