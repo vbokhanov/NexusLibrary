@@ -1501,8 +1501,48 @@ async function fetchAdminUsers(navigate, rerender) {
   } finally {
     state.adminUi.loading = false;
     renderAdminUserListDom();
+    capAdminListToRows(5);
     syncAdminDetailForm();
   }
+}
+
+function capAdminListToRows(maxRows = 5) {
+  const list = document.querySelector("#adminUserList");
+  if (!(list instanceof HTMLElement)) return;
+  const rows = [...list.querySelectorAll(".admin-user-row")];
+  if (rows.length <= maxRows) {
+    list.style.maxHeight = "";
+    return;
+  }
+  const cs = getComputedStyle(list);
+  const gap = Number.parseFloat(cs.rowGap || cs.gap || "0") || 0;
+  const padTop = Number.parseFloat(cs.paddingTop || "0") || 0;
+  const padBottom = Number.parseFloat(cs.paddingBottom || "0") || 0;
+  let h = padTop + padBottom + gap * Math.max(0, maxRows - 1);
+  for (let i = 0; i < Math.min(maxRows, rows.length); i++) h += rows[i].offsetHeight;
+  list.style.maxHeight = `${Math.ceil(h)}px`;
+}
+
+function bindScrollTrapForElement(el) {
+  if (!(el instanceof HTMLElement)) return;
+  if (el.dataset.scrollTrapWired === "1") return;
+  el.dataset.scrollTrapWired = "1";
+  el.addEventListener(
+    "wheel",
+    (e) => {
+      const { dy } = wheelPixelDeltas(e, el);
+      if (dy === 0) return;
+      const prev = el.scrollTop;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      const next = Math.min(max, Math.max(0, prev + dy));
+      if (max > 0) {
+        el.scrollTop = next;
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    { passive: false }
+  );
 }
 
 async function patchSelectedUserBanned(banned, navigate, rerender) {
@@ -1659,6 +1699,8 @@ function bindAdmin(navigate, rerender) {
   });
 
   const listEl = document.querySelector("#adminUserList");
+  bindScrollTrapForElement(listEl);
+  bindScrollTrapForElement(document.querySelector("#adminUserForm"));
   listEl?.addEventListener("click", (e) => {
     const row = eventClickTargetElement(e)?.closest("[data-admin-user]");
     if (!row) return;
