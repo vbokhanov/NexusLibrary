@@ -888,6 +888,10 @@ label.file-fake-btn:hover,
   max-height: none !important;
   min-height: 0 !important;
 }
+#app:has(.admin-page--frame) > .layout.wide {
+  min-height: 100% !important;
+  padding-bottom: 0 !important;
+}
 .admin-page--frame {
   display: grid;
   gap: 14px;
